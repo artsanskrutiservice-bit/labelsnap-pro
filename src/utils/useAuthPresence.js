@@ -1,20 +1,30 @@
-// src/utils/useAuthPresence.js
 import { useState, useEffect } from 'react';
 import { auth, googleProvider, db, rtdb } from '../firebase';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
-import { ref, onValue, set, onDisconnect } from 'firebase/database';
+import { ref, onValue, set, onDisconnect, remove } from 'firebase/database';
 
-// Admin email jene badha rights ane lifetime pro access raheshe
-const ADMIN_EMAIL = "dhruvusadadiya321@gmail.com"; 
+const ADMIN_EMAIL = "dhruvusadadiya321@gmail.com";
+
+// Browser mate unique guest session id generator
+function getOrCreateSessionId() {
+  let sid = localStorage.getItem('labelsnap_guest_sid');
+  if (!sid) {
+    sid = 'guest_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now();
+    localStorage.setItem('labelsnap_guest_sid', sid);
+  }
+  return sid;
+}
 
 export function useAuthPresence() {
   const [currentUser, setCurrentUser] = useState(null);
   const [isPro, setIsPro] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [activeUsersCount, setActiveUsersCount] = useState(0);
+  const [guestCount, setGuestCount] = useState(0);
+  const [registeredOnlineCount, setRegisteredOnlineCount] = useState(0);
 
-  // 1. Google Sign-in Popup
+  // 1. Google Login Popup
   const loginWithGoogle = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
@@ -28,7 +38,12 @@ export function useAuthPresence() {
     try {
       if (currentUser) {
         const userStatusRef = ref(rtdb, `/status/${currentUser.uid}`);
-        await set(userStatusRef, { state: 'offline', last_changed: Date.now() });
+        await set(userStatusRef, { 
+          state: 'offline', 
+          type: 'registered',
+          email: currentUser.email,
+          last_changed: Date.now() 
+        });
       }
       await signOut(auth);
     } catch (err) {
@@ -37,9 +52,29 @@ export function useAuthPresence() {
   };
 
   useEffect(() => {
-    // 3. Firebase Auth State Listener
+    const sid = getOrCreateSessionId();
+    const guestStatusRef = ref(rtdb, `/status/${sid}`);
+    const connectedRef = ref(rtdb, '.info/connected');
+
+    // 3. Visitor / Guest Presence Tracking (Without Login)
+    const unsubConnected = onValue(connectedRef, (snap) => {
+      if (snap.val() === true && !auth.currentUser) {
+        onDisconnect(guestStatusRef).remove();
+        set(guestStatusRef, {
+          state: 'online',
+          type: 'guest',
+          sid: sid,
+          last_changed: Date.now()
+        });
+      }
+    });
+
+    // 4. Firebase Auth State Listener
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // Jyare user login thay tyare guest node remove kari nakho
+        remove(guestStatusRef).catch(() => {});
+
         setCurrentUser(user);
         const userIsAdmin = user.email === ADMIN_EMAIL;
         setIsAdmin(userIsAdmin);
@@ -47,7 +82,6 @@ export function useAuthPresence() {
         const userDocRef = doc(db, 'users', user.uid);
         const userDoc = await getDoc(userDocRef);
 
-        // Jo navo user hoy to database ma document create karo
         if (!userDoc.exists()) {
           await setDoc(userDocRef, {
             email: user.email,
@@ -58,18 +92,34 @@ export function useAuthPresence() {
           });
         }
 
-        // Realtime Firestore Snapshot Listener (Role ane Expiry Date check karva mate)
+        // Live Realtime Presence for Logged-In User
+        const userStatusRef = ref(rtdb, `/status/${user.uid}`);
+        onDisconnect(userStatusRef).set({
+          state: 'offline',
+          type: 'registered',
+          email: user.email,
+          name: user.displayName || 'User',
+          last_changed: Date.now()
+        });
+
+        set(userStatusRef, {
+          state: 'online',
+          type: 'registered',
+          email: user.email,
+          name: user.displayName || 'User',
+          last_changed: Date.now()
+        });
+
+        // Firestore Realtime Role & Expiry Listener
         const unsubscribeDoc = onSnapshot(userDocRef, async (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
 
-            // Admin mate hamesha Pro raheshe
             if (user.email === ADMIN_EMAIL) {
               setIsPro(true);
               return;
             }
 
-            // Regular users mate role ane plan expiry verify karo
             if (data.role === 'pro') {
               if (data.planExpiresAt === 'lifetime') {
                 setIsPro(true);
@@ -78,10 +128,8 @@ export function useAuthPresence() {
                 const expiry = new Date(data.planExpiresAt);
 
                 if (now < expiry) {
-                  // Plan chalu che
                   setIsPro(true);
                 } else {
-                  // Plan no time puro thai gayo -> Aape-aap Free role kari devu
                   await updateDoc(userDocRef, {
                     role: 'free',
                     planExpiresAt: null
@@ -97,48 +145,38 @@ export function useAuthPresence() {
           }
         });
 
-        // 4. Live Presence Tracking (Realtime Database Heartbeat)
-        const userStatusRef = ref(rtdb, `/status/${user.uid}`);
-        const connectedRef = ref(rtdb, '.info/connected');
-
-        onValue(connectedRef, (snapshot) => {
-          if (snapshot.val() === true) {
-            onDisconnect(userStatusRef).set({
-              state: 'offline',
-              email: user.email,
-              name: user.displayName || 'User',
-              last_changed: Date.now()
-            });
-
-            set(userStatusRef, {
-              state: 'online',
-              email: user.email,
-              name: user.displayName || 'User',
-              last_changed: Date.now()
-            });
-          }
-        });
-
-        return () => {
-          unsubscribeDoc();
-        };
-
+        return () => unsubscribeDoc();
       } else {
         setCurrentUser(null);
         setIsPro(false);
         setIsAdmin(false);
+
+        // Logout pachi fari thi guest node activate karo
+        set(guestStatusRef, {
+          state: 'online',
+          type: 'guest',
+          sid: sid,
+          last_changed: Date.now()
+        });
       }
     });
 
-    // 5. Total Online Active Users Counter Listener
+    // 5. Total Online Active Users Listener (Guests + Registered)
     const allStatusRef = ref(rtdb, '/status');
     const unsubscribeStatus = onValue(allStatusRef, (snapshot) => {
       const data = snapshot.val() || {};
-      const onlineCount = Object.values(data).filter(u => u.state === 'online').length;
-      setActiveUsersCount(onlineCount);
+      const allOnline = Object.values(data).filter(u => u.state === 'online');
+      
+      const guests = allOnline.filter(u => u.type === 'guest').length;
+      const registered = allOnline.filter(u => u.type === 'registered').length;
+
+      setActiveUsersCount(allOnline.length);
+      setGuestCount(guests);
+      setRegisteredOnlineCount(registered);
     });
 
     return () => {
+      unsubConnected();
       unsubscribeAuth();
       unsubscribeStatus();
     };
@@ -149,6 +187,8 @@ export function useAuthPresence() {
     isPro,
     isAdmin,
     activeUsersCount,
+    guestCount,
+    registeredOnlineCount,
     loginWithGoogle,
     logout
   };

@@ -1,116 +1,211 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuthPresence } from './utils/useAuthPresence';
 import AdminPanel from './components/AdminPanel';
+import Header from './components/Header';
+import FeaturesSection from './components/FeaturesSection';
+import Footer from './components/Footer';
+
 import { 
   Upload, 
   FileText, 
   Download, 
   CheckCircle2, 
-  LogOut, 
-  LogIn, 
   Scissors, 
-  Layers,
-  Sparkles,
-  RefreshCw,
-  ShieldCheck,
-  AlertCircle
+  Layers, 
+  Sparkles, 
+  RefreshCw, 
+  AlertCircle,
+  Printer,
+  SlidersHorizontal,
+  ArrowUpDown,
+  Info,
+  Tag,
+  ClipboardList,
+  FileSpreadsheet,
+  Files,
+  FileCheck
 } from 'lucide-react';
-import { renderPreviewCanvas, processLabels } from './utils/pdfProcessor';
+
+import { 
+  renderPreviewCanvas, 
+  processLabels, 
+  mergeMultiplePdfs, 
+  generatePickListPDF,
+  exportManifestToCSV 
+} from './utils/pdfProcessor';
 
 export default function App() {
   const [platform, setPlatform] = useState('flipkart');
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);
   const [inputBytes, setInputBytes] = useState(null);
   const [outputBytes, setOutputBytes] = useState(null);
-  const [status, setStatus] = useState('Platform select karo ane tamari PDF upload karo.');
-  const [statusType, setStatusType] = useState('info'); // info | ok | warn
+  const [manifestData, setManifestData] = useState([]);
+  const [status, setStatus] = useState('Select your marketplace and upload your shipping label PDF.');
+  const [statusType, setStatusType] = useState('info');
   const [processing, setProcessing] = useState(false);
   const [progressText, setProgressText] = useState('');
-  const canvasRef = useRef(null);
+  
+  // Custom Controls & Print Settings
+  const [processingMode, setProcessingMode] = useState('label_only');
+  const [amazonInvoiceMode, setAmazonInvoiceMode] = useState('remove');
+  const [amazonSkuMode, setAmazonSkuMode] = useState('id_only');
+  const [printStyleCode, setPrintStyleCode] = useState(false);
+  const [sortBySku, setSortBySku] = useState(false);
+  const [autoDownload, setAutoDownload] = useState(true);
+  const [darkenThermal, setDarkenThermal] = useState(false);
+  const [brandingText, setBrandingText] = useState('');
+  const [darkMode, setDarkMode] = useState(true);
 
-  // Firebase Auth, Admin Status & Live Presence Hook
+  // Admin View Toggle (Controlled via Header)
+  const [showAdminView, setShowAdminView] = useState(false);
+
+  const [hoveredTip, setHoveredTip] = useState(
+    'Hover your cursor over any setting to see how it works.'
+  );
+
+  const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // Auth, Presence & Live Visitor Stats
   const { 
     currentUser, 
     isPro, 
     isAdmin, 
-    activeUsersCount, 
+    activeUsersCount,
+    guestCount,
+    registeredOnlineCount, 
     loginWithGoogle, 
     logout 
   } = useAuthPresence();
 
-  // Platform details & Light Brand Colors
   const platforms = [
     { 
       id: 'flipkart', 
       name: 'Flipkart', 
-      desc: '1 Label / A4 Page (Centered with 0.5mm margin)',
+      desc: 'Precision Thermal 4x6 / Single Page crop',
       activeBg: 'bg-blue-600',
-      tagText: 'text-blue-700'
     },
     { 
       id: 'meesho', 
       name: 'Meesho', 
-      desc: 'Exact cropped label + 2mm thermal bottom margin',
+      desc: 'Crop with 2mm margin + SKU & Size injection',
       activeBg: 'bg-pink-600',
-      tagText: 'text-pink-700'
     },
     { 
       id: 'amazon', 
       name: 'Amazon', 
-      desc: 'Smart 2-Page pairing (SKU ID & QTY auto-printed on label)',
+      desc: 'Dynamic 2-page invoice pairing & SKU extraction',
       activeBg: 'bg-amber-600',
-      tagText: 'text-amber-800'
     },
   ];
 
   const activePlatform = platforms.find((p) => p.id === platform);
 
+  // Keyboard Shortcuts: Ctrl+U (Upload) & Ctrl+Enter (Crop)
   useEffect(() => {
-    if (inputBytes && canvasRef.current) {
-      renderPreviewCanvas(inputBytes, platform, canvasRef.current).catch(() => {});
-    }
-  }, [platform]);
-
-  const handleFileChange = (e) => {
-    const selected = e.target.files[0];
-    if (!selected) return;
-
-    setFile(selected);
-    setOutputBytes(null);
-    setStatus('PDF file read thai rahi che...');
-    setStatusType('info');
-
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const bytes = new Uint8Array(reader.result);
-      setInputBytes(bytes);
-      setStatus('Live preview render thai rahyo che...');
-      try {
-        if (canvasRef.current) {
-          await renderPreviewCanvas(bytes, platform, canvasRef.current);
-        }
-        setStatus('PDF ready che. Have "Crop Labels" par click karo.', 'ok');
-        setStatusType('ok');
-      } catch (err) {
-        setStatus('Preview load na thayu, pan tame direct crop kari shako cho.');
-        setStatusType('warn');
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
+        e.preventDefault();
+        fileInputRef.current?.click();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (inputBytes && !processing) handleCrop();
       }
     };
-    reader.readAsArrayBuffer(selected);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [inputBytes, processing, processingMode, amazonInvoiceMode, amazonSkuMode, printStyleCode, sortBySku, brandingText, autoDownload, darkenThermal]);
+
+  // Live Canvas Preview Reload
+  useEffect(() => {
+    if (inputBytes && canvasRef.current) {
+      renderPreviewCanvas(inputBytes, platform, canvasRef.current, { darkenThermal }).catch(() => {});
+    }
+  }, [platform, darkenThermal]);
+
+  // Multi-PDF File Upload Handler
+  const handleFileChange = async (e) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length === 0) return;
+
+    setFiles(selectedFiles);
+    setOutputBytes(null);
+    setManifestData([]);
+    setStatus('Reading and loading PDF files...');
+    setStatusType('info');
+
+    try {
+      const arrayBuffers = await Promise.all(
+        selectedFiles.map((file) => file.arrayBuffer().then((buf) => new Uint8Array(buf)))
+      );
+
+      let finalBytes;
+      if (arrayBuffers.length > 1) {
+        setStatus(`Merging ${arrayBuffers.length} PDF files...`);
+        finalBytes = await mergeMultiplePdfs(arrayBuffers);
+      } else {
+        finalBytes = arrayBuffers[0];
+      }
+
+      setInputBytes(finalBytes);
+      setStatus('Rendering live preview...');
+
+      if (canvasRef.current) {
+        await renderPreviewCanvas(finalBytes, platform, canvasRef.current, { darkenThermal });
+      }
+      setStatus(`${selectedFiles.length} file(s) ready. Click "Process & Crop".`);
+      setStatusType('ok');
+    } catch (err) {
+      setStatus('Preview could not load, but direct label processing will work.');
+      setStatusType('warn');
+    }
+  };
+
+  const downloadBlob = (bytes, filename) => {
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
 
   const handleCrop = async () => {
     if (!inputBytes) return;
     setProcessing(true);
-    setProgressText('Processing start thai rahyu che...');
+    setProgressText('Processing your order batch...');
     setStatusType('info');
+
     try {
-      const result = await processLabels(inputBytes, platform, (current, total) => {
-        setProgressText(`Processing ${current} of ${total} orders...`);
-      });
-      setOutputBytes(result);
-      setStatus('Crop complete! Download button par click kari ne file save karo.', 'ok');
+      const { pdfResultBytes, manifestData: mData } = await processLabels(
+        inputBytes, 
+        platform, 
+        (current, total) => {
+          setProgressText(`Processing label ${current} of ${total}...`);
+        },
+        { 
+          processingMode, 
+          amazonInvoiceMode, 
+          amazonSkuMode, 
+          printStyleCode, 
+          sortBySku, 
+          brandingText, 
+          darkenThermal 
+        }
+      );
+
+      setOutputBytes(pdfResultBytes);
+      setManifestData(mData || []);
+      setStatus('Batch completed successfully!');
       setStatusType('ok');
+
+      if (autoDownload) {
+        downloadBlob(pdfResultBytes, `${platform}-cropped-batch.pdf`);
+      }
     } catch (err) {
       setStatus(`Error: ${err.message}`);
       setStatusType('warn');
@@ -120,274 +215,507 @@ export default function App() {
     }
   };
 
-  const handleDownload = () => {
-    if (!outputBytes) return;
-    const blob = new Blob([outputBytes], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${platform}-cropped-labels.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  const handleDownloadPickList = async () => {
+    if (manifestData.length === 0) return;
+    try {
+      const pickListBytes = await generatePickListPDF(manifestData, platform);
+      downloadBlob(pickListBytes, `${platform}-dispatch-picklist.pdf`);
+    } catch (err) {
+      alert('Failed to generate pick-list PDF.');
+    }
+  };
+
+  const handleExportCSV = () => {
+    if (manifestData.length === 0) return;
+    exportManifestToCSV(manifestData, platform);
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-slate-50 text-slate-800 font-sans">
+    <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
+      darkMode ? 'bg-[#0b0f19] text-slate-100' : 'bg-slate-50 text-slate-800'
+    }`}>
       
-      {/* 1. Header (Clean White + Firebase Auth) */}
-      <header className="bg-white border-b border-slate-200 px-6 py-4 shadow-sm sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          
-          <div className="flex items-center gap-3">
-            <div className={`p-2.5 rounded-xl ${activePlatform.activeBg} text-white shadow-md transition-colors duration-300`}>
-              <Scissors size={20} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold tracking-tight text-slate-900">LabelSnap Pro</h1>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                  DESKTOP
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">Fast E-commerce Shipping Label Cropper</p>
-            </div>
-          </div>
+      {/* 1. Header with Embedded Marketplace Switcher & Admin Button */}
+      <Header 
+        platform={platform}
+        setPlatform={setPlatform}
+        platforms={platforms}
+        activePlatform={activePlatform}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        currentUser={currentUser}
+        isAdmin={isAdmin}
+        isPro={isPro}
+        loginWithGoogle={loginWithGoogle}
+        logout={logout}
+        showAdminView={showAdminView}
+        setShowAdminView={setShowAdminView}
+      />
 
-          <div className="flex items-center gap-3">
-            {currentUser ? (
-              <div className="flex items-center gap-3 bg-slate-100 border border-slate-200 pl-3 pr-2 py-1.5 rounded-xl">
-                <div className="flex flex-col text-right">
-                  <span className="text-xs font-semibold text-slate-800 truncate max-w-[140px]">
-                    {currentUser.displayName || currentUser.email}
-                  </span>
-                  <span className={`text-[10px] font-bold ${isPro ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {isAdmin ? 'ADMIN (PRO)' : isPro ? 'PRO (Unlimited)' : 'FREE TIER'}
-                  </span>
-                </div>
-                <button 
-                  onClick={logout}
-                  className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-500 hover:text-rose-600 transition"
-                  title="Logout"
-                >
-                  <LogOut size={16} />
-                </button>
-              </div>
-            ) : (
-              <button 
-                onClick={loginWithGoogle}
-                className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold px-4 py-2 rounded-xl border border-slate-300 hover:border-slate-400 transition shadow-sm"
-              >
-                <LogIn size={15} className="text-indigo-600" />
-                Sign in with Google
-              </button>
-            )}
-          </div>
-
-        </div>
-      </header>
-
-      {/* 2. Main Workspace */}
-      <main className="max-w-6xl w-full mx-auto p-6 flex-1 flex flex-col gap-5">
+      {/* 2. Main Body: Switch between Admin Panel and Studio Workspace */}
+      <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-5 flex-1">
         
-        {/* Animated Platform Tabs */}
-        <div className="bg-slate-200/70 p-1.5 rounded-2xl flex items-center relative shadow-inner">
-          {platforms.map((p) => {
-            const isActive = platform === p.id;
-            return (
-              <button
-                key={p.id}
-                onClick={() => setPlatform(p.id)}
-                className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold tracking-wide transition-all duration-300 relative z-10 flex items-center justify-center gap-2 ${
-                  isActive 
-                    ? 'text-white' 
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
+        {showAdminView && isAdmin ? (
+          /* Admin View Mode with Live Counts */
+          <div className="w-full flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-slate-200">System Administration</h2>
+              <button 
+                onClick={() => setShowAdminView(false)}
+                className="text-xs font-semibold text-blue-400 hover:underline"
               >
-                {p.name}
+                ← Return to Label Studio
               </button>
-            );
-          })}
-
-          <div 
-            className={`absolute top-1.5 bottom-1.5 rounded-xl ${activePlatform.activeBg} transition-all duration-300 ease-out shadow-sm`}
-            style={{
-              width: `calc(100% / 3 - 4px)`,
-              left: platform === 'flipkart' ? '4px' : platform === 'meesho' ? 'calc(100% / 3)' : 'calc((100% / 3) * 2 - 4px)'
-            }}
-          />
-        </div>
-
-        {/* Platform Info Line */}
-        <div className="flex items-center justify-between px-4 py-2 bg-white rounded-xl border border-slate-200 text-xs text-slate-600 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Sparkles size={14} className="text-amber-500" />
-            <span><b className="text-slate-800">{activePlatform.name}:</b> {activePlatform.desc}</span>
+            </div>
+            <AdminPanel 
+              activeCount={activeUsersCount} 
+              guestCount={guestCount}
+              registeredOnlineCount={registeredOnlineCount}
+            />
           </div>
-          <span className="text-[11px] text-slate-400 font-medium">100% Local Processing</span>
-        </div>
-
-        {/* Workspace Panels */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-          
-          {/* Left Panel: Upload & Actions */}
-          <div className="md:col-span-6 flex flex-col gap-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <FileText size={16} className="text-indigo-600" />
-                Upload PDF File
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">Tamara {activePlatform.name} na labels ahiya upload karo</p>
+        ) : (
+          /* Regular Cropper Studio View */
+          <>
+            {/* Marketplace Information Bar */}
+            <div className={`flex items-center justify-between px-4 py-2.5 rounded-xl border text-xs shadow-sm ${
+              darkMode ? 'bg-slate-900/60 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-600'
+            }`}>
+              <div className="flex items-center gap-2">
+                <Sparkles size={14} className="text-amber-400" />
+                <span><b className={darkMode ? 'text-white' : 'text-slate-800'}>{activePlatform.name}:</b> {activePlatform.desc}</span>
+              </div>
+              <div className="hidden sm:flex items-center gap-3">
+                <span className="text-[11px] text-slate-400">Shortcuts: <b>Ctrl+U</b> (Upload) • <b>Ctrl+Enter</b> (Crop)</span>
+                <span className="text-[11px] text-emerald-400 font-semibold">• 100% Client-Side Private</span>
+              </div>
             </div>
 
-            <label className="border-2 border-dashed border-slate-300 hover:border-slate-400 rounded-xl p-8 flex flex-col items-center justify-center gap-2 cursor-pointer bg-slate-50/50 hover:bg-slate-50 transition duration-200">
-              <input type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
+            {/* 3-Column Studio: Left (Upload) | Center (Preview) | Right (Settings) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
-              <div className="p-3 bg-white text-slate-600 border border-slate-200 rounded-xl shadow-sm">
-                <Upload size={24} />
-              </div>
+              {/* Left Column: Upload */}
+              <div className={`lg:col-span-4 flex flex-col gap-4 border rounded-2xl p-5 shadow-sm ${
+                darkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200'
+              }`}>
+                <div>
+                  <h2 className="text-sm font-bold flex items-center gap-2">
+                    <FileText size={16} className="text-blue-500" />
+                    Upload PDF Labels (Single / Multi)
+                  </h2>
+                  <p className={`text-xs mt-0.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Batch drop multiple marketplace files together
+                  </p>
+                </div>
 
-              <div className="text-center mt-1">
-                <p className="text-sm font-semibold text-slate-700">
-                  PDF select karva click karo
-                </p>
-                <p className="text-xs text-slate-400 mt-0.5">athva ahiya drag & drop karo</p>
-              </div>
-            </label>
+                <label className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition duration-200 ${
+                  darkMode 
+                    ? 'border-slate-800 hover:border-slate-700 bg-slate-950/40 hover:bg-slate-950/80' 
+                    : 'border-slate-300 hover:border-slate-400 bg-slate-50/50 hover:bg-slate-50'
+                }`}>
+                  <input 
+                    ref={fileInputRef}
+                    type="file" 
+                    accept="application/pdf" 
+                    multiple
+                    className="hidden" 
+                    onChange={handleFileChange} 
+                  />
+                  
+                  <div className={`p-3 border rounded-xl shadow-sm ${
+                    darkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-white border-slate-200 text-slate-600'
+                  }`}>
+                    <Upload size={22} />
+                  </div>
 
-            {file && (
-              <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
-                <div className="flex items-center gap-2.5 truncate">
-                  <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
-                  <div className="truncate">
-                    <p className="text-xs font-semibold text-slate-800 truncate">{file.name}</p>
-                    <p className="text-[11px] text-slate-500">{(file.size / 1024).toFixed(1)} KB • PDF Document</p>
+                  <div className="text-center mt-1">
+                    <p className="text-sm font-semibold">Choose Label PDF(s)</p>
+                    <p className={`text-xs mt-0.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>or drag &amp; drop here</p>
+                  </div>
+                </label>
+
+                {files.length > 0 && (
+                  <div className={`p-3 rounded-xl border flex flex-col gap-2 ${
+                    darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
+                  }`}>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold flex items-center gap-1.5 text-emerald-400">
+                        <Files size={14} />
+                        {files.length} Document(s) Loaded
+                      </span>
+                      <button 
+                        onClick={() => { setFiles([]); setInputBytes(null); setOutputBytes(null); setManifestData([]); }}
+                        className="text-rose-400 hover:text-rose-500 font-semibold"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    <div className="max-h-24 overflow-y-auto flex flex-col gap-1 pr-1">
+                      {files.map((f, idx) => (
+                        <div key={idx} className="text-[11px] truncate flex items-center justify-between text-slate-400">
+                          <span className="truncate">{idx + 1}. {f.name}</span>
+                          <span>{(f.size / 1024).toFixed(0)} KB</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className={`p-3 rounded-xl border flex items-center gap-2 text-xs ${
+                  statusType === 'ok' 
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                    : statusType === 'warn'
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    : darkMode 
+                    ? 'bg-slate-800/60 border-slate-700 text-slate-300' 
+                    : 'bg-slate-100 border-slate-200 text-slate-600'
+                }`}>
+                  {statusType === 'ok' ? (
+                    <CheckCircle2 size={16} className="shrink-0" />
+                  ) : statusType === 'warn' ? (
+                    <AlertCircle size={16} className="shrink-0" />
+                  ) : (
+                    <Sparkles size={16} className="shrink-0" />
+                  )}
+                  <span>{processing ? progressText : status}</span>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-1">
+                  <button
+                    disabled={!inputBytes || processing}
+                    onClick={handleCrop}
+                    className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-sm text-white shadow-md transition ${
+                      !inputBytes || processing
+                        ? 'bg-slate-700 cursor-not-allowed opacity-50'
+                        : `${activePlatform.activeBg} hover:opacity-90 active:scale-[0.99]`
+                    }`}
+                  >
+                    {processing ? (
+                      <>
+                        <RefreshCw size={16} className="animate-spin" />
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Scissors size={16} />
+                        <span>Process &amp; Crop (Ctrl+Enter)</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    disabled={!outputBytes}
+                    onClick={() => outputBytes && downloadBlob(outputBytes, `${platform}-cropped-batch.pdf`)}
+                    className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-xs transition ${
+                      outputBytes
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md'
+                        : darkMode ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <Download size={15} />
+                    <span>Download Cropped PDF</span>
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      disabled={manifestData.length === 0}
+                      onClick={handleDownloadPickList}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl font-bold text-[11px] transition ${
+                        manifestData.length > 0
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm'
+                          : darkMode ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      }`}
+                      title="Generate Pick-List Summary PDF"
+                    >
+                      <ClipboardList size={13} />
+                      <span>Pick-List PDF</span>
+                    </button>
+
+                    <button
+                      disabled={manifestData.length === 0}
+                      onClick={handleExportCSV}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-xl font-bold text-[11px] transition ${
+                        manifestData.length > 0
+                          ? 'bg-teal-600 hover:bg-teal-700 text-white shadow-sm'
+                          : darkMode ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      }`}
+                      title="Export Dispatch Manifest as CSV"
+                    >
+                      <FileSpreadsheet size={13} />
+                      <span>Manifest CSV</span>
+                    </button>
                   </div>
                 </div>
-                <button 
-                  onClick={() => { setFile(null); setInputBytes(null); setOutputBytes(null); }}
-                  className="text-xs text-rose-500 hover:text-rose-700 font-semibold ml-2"
-                >
-                  Remove
-                </button>
+
               </div>
-            )}
 
-            {/* Status Indicator */}
-            <div className={`p-3 rounded-xl border flex items-center gap-2 text-xs ${
-              statusType === 'ok' 
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-700' 
-                : statusType === 'warn'
-                ? 'bg-amber-50 border-amber-200 text-amber-700'
-                : 'bg-slate-50 border-slate-200 text-slate-600'
-            }`}>
-              {statusType === 'ok' ? (
-                <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
-              ) : statusType === 'warn' ? (
-                <AlertCircle size={16} className="text-amber-600 shrink-0" />
-              ) : (
-                <Sparkles size={16} className="text-slate-500 shrink-0" />
-              )}
-              <span>{processing ? progressText : status}</span>
-            </div>
+              {/* Center Column: Live Preview Canvas */}
+              <div className={`lg:col-span-5 flex flex-col gap-4 border rounded-2xl p-5 shadow-sm min-h-[460px] ${
+                darkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-bold flex items-center gap-2">
+                    <Layers size={16} className="text-blue-500" />
+                    Live Cropped Preview
+                  </h2>
 
-            {/* Action Buttons */}
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                disabled={!inputBytes || processing}
-                onClick={handleCrop}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold text-sm text-white shadow-sm transition ${
-                  !inputBytes || processing
-                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                    : `${activePlatform.activeBg} hover:opacity-90 active:scale-[0.99]`
-                }`}
-              >
-                {processing ? (
-                  <>
-                    <RefreshCw size={16} className="animate-spin" />
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Scissors size={16} />
-                    <span>Crop Labels</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                disabled={!outputBytes}
-                onClick={handleDownload}
-                className={`flex items-center justify-center gap-2 py-3 px-5 rounded-xl font-bold text-sm transition ${
-                  outputBytes
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
-                    : 'bg-slate-100 border border-slate-200 text-slate-400 cursor-not-allowed'
-                }`}
-              >
-                <Download size={16} />
-                <span>Download</span>
-              </button>
-            </div>
-
-          </div>
-
-          {/* Right Panel: Live Preview Canvas */}
-          <div className="md:col-span-6 flex flex-col gap-4 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm min-h-[440px]">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Layers size={16} className="text-indigo-600" />
-                Live Cropped Preview
-              </h2>
-
-              {inputBytes && (
-                <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                  Page 1 Live View
-                </span>
-              )}
-            </div>
-
-            <div className="flex-1 bg-slate-50 rounded-xl border border-slate-200 border-dashed flex items-center justify-center p-4 relative overflow-hidden">
-              <canvas 
-                ref={canvasRef} 
-                className={`max-w-full max-h-[420px] object-contain shadow-sm border border-slate-200 rounded bg-white transition-opacity ${
-                  file ? 'opacity-100' : 'opacity-0 pointer-events-none'
-                }`} 
-              />
-              
-              {!file && (
-                <div className="flex flex-col items-center gap-2 text-slate-400">
-                  <Layers size={32} className="stroke-[1.5]" />
-                  <p className="text-xs font-medium">PDF upload karso etle ahiya preview dekhase</p>
+                  {inputBytes && (
+                    <span className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-lg border ${
+                      darkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'
+                    }`}>
+                      Page 1 Live View
+                    </span>
+                  )}
                 </div>
-              )}
+
+                <div className={`flex-1 rounded-xl border border-dashed flex items-center justify-center p-4 relative overflow-hidden ${
+                  darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
+                }`}>
+                  <canvas 
+                    ref={canvasRef} 
+                    className={`max-w-full max-h-[400px] object-contain shadow-sm border rounded bg-white transition-opacity ${
+                      files.length > 0 ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                    }`} 
+                  />
+                  
+                  {files.length === 0 && (
+                    <div className="flex flex-col items-center gap-2 text-slate-400 text-center">
+                      <Layers size={36} className="stroke-[1.5]" />
+                      <p className="text-xs font-medium">Upload shipping labels to inspect real-time preview</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Settings Panel */}
+              <div className={`lg:col-span-3 flex flex-col gap-4 border rounded-2xl p-5 shadow-sm ${
+                darkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200'
+              }`}>
+                <div className="flex items-center gap-2 text-xs font-bold tracking-wide">
+                  <SlidersHorizontal size={16} className="text-blue-500" />
+                  <span>Smart Rules &amp; Print Modes</span>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  
+                  {platform !== 'amazon' && (
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Processing Mode</span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onMouseEnter={() => setHoveredTip('Label Only: Crops strictly the shipping label box with zero invoice clutter. Optimal for standard 4x6 thermal rolls.')}
+                          onClick={() => setProcessingMode('label_only')}
+                          className={`p-2 rounded-xl border text-center text-xs font-semibold flex flex-col items-center gap-1 transition ${
+                            processingMode === 'label_only'
+                              ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                              : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <Scissors size={14} />
+                          <span>Label Only</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onMouseEnter={() => setHoveredTip('Single Page Mode: Keeps shipping label and tax invoice intact together to prevent marketplace penalties.')}
+                          onClick={() => setProcessingMode('single_page')}
+                          className={`p-2 rounded-xl border text-center text-xs font-semibold flex flex-col items-center gap-1 transition ${
+                            processingMode === 'single_page'
+                              ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                              : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <FileCheck size={14} />
+                          <span>Single Page</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {platform === 'amazon' && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Invoice Handling</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onMouseEnter={() => setHoveredTip('Remove Invoice: Strips out Page 2 (Customer Invoice) automatically and yields only the cropped label.')}
+                            onClick={() => setAmazonInvoiceMode('remove')}
+                            className={`p-2 rounded-xl border text-center text-xs font-semibold transition ${
+                              amazonInvoiceMode === 'remove'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            Remove Invoice
+                          </button>
+
+                          <button
+                            type="button"
+                            onMouseEnter={() => setHoveredTip('Keep Invoice: Preserves the customer invoice page right behind each cropped shipping label for dispatch.')}
+                            onClick={() => setAmazonInvoiceMode('keep')}
+                            className={`p-2 rounded-xl border text-center text-xs font-semibold transition ${
+                              amazonInvoiceMode === 'keep'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            Keep Invoice
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SKU Header Style</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onMouseEnter={() => setHoveredTip('Print SKU ID Only: Prints concise item identification code on the label header.')}
+                            onClick={() => setAmazonSkuMode('id_only')}
+                            className={`p-1.5 rounded-lg border text-center text-[11px] font-semibold transition ${
+                              amazonSkuMode === 'id_only'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                : darkMode ? 'border-slate-800' : 'border-slate-200'
+                            }`}
+                          >
+                            SKU ID Only
+                          </button>
+
+                          <button
+                            type="button"
+                            onMouseEnter={() => setHoveredTip('Print SKU with Description: Includes product name along with the SKU ID on the label.')}
+                            onClick={() => setAmazonSkuMode('with_desc')}
+                            className={`p-1.5 rounded-lg border text-center text-[11px] font-semibold transition ${
+                              amazonSkuMode === 'with_desc'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                : darkMode ? 'border-slate-800' : 'border-slate-200'
+                            }`}
+                          >
+                            With Description
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {platform === 'meesho' && (
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredTip('Print Style Code & Size: Extracts product style code and garment size (S, M, L, XL) and imprints it clearly on the footer.')}
+                      onClick={() => setPrintStyleCode(!printStyleCode)}
+                      className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
+                        printStyleCode
+                          ? 'border-pink-500 bg-pink-500/10 text-pink-400'
+                          : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Tag size={15} />
+                        Print Style Code &amp; Size
+                      </span>
+                      {printStyleCode && <CheckCircle2 size={14} />}
+                    </button>
+                  )}
+
+                  {platform === 'amazon' && (
+                    <button
+                      type="button"
+                      onMouseEnter={() => setHoveredTip('SKU Auto-Sort: Groups same SKU products sequentially to accelerate picking and packing in your warehouse.')}
+                      onClick={() => setSortBySku(!sortBySku)}
+                      className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
+                        sortBySku
+                          ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                          : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <ArrowUpDown size={15} />
+                        SKU-Wise Order Sorting
+                      </span>
+                      {sortBySku && <CheckCircle2 size={14} />}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onMouseEnter={() => setHoveredTip('Darken Thermal Barcodes: Applies a contrast enhancement pass to ensure instant handheld scanner detection on thermal papers.')}
+                    onClick={() => setDarkenThermal(!darkenThermal)}
+                    className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
+                      darkenThermal
+                        ? 'border-purple-500 bg-purple-500/10 text-purple-400'
+                        : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Printer size={15} />
+                      Darken Thermal Barcode
+                    </span>
+                    {darkenThermal && <CheckCircle2 size={14} />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onMouseEnter={() => setHoveredTip('Auto Download: Triggers instant browser download of the cropped PDF as soon as processing completes.')}
+                    onClick={() => setAutoDownload(!autoDownload)}
+                    className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
+                      autoDownload
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                        : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Download size={15} />
+                      Auto Download on Finish
+                    </span>
+                    {autoDownload && <CheckCircle2 size={14} />}
+                  </button>
+
+                </div>
+
+                <div 
+                  className="flex flex-col gap-1.5 pt-2 border-t border-slate-800/40"
+                  onMouseEnter={() => setHoveredTip('Custom Label Footer: Custom store name or unboxing notice printed at the bottom margin of each cropped label.')}
+                >
+                  <label className="text-[11px] font-bold flex items-center gap-1">
+                    <Tag size={12} className="text-blue-400" />
+                    <span>Custom Label Footer / Branding</span>
+                  </label>
+                  <input 
+                    type="text" 
+                    value={brandingText}
+                    onChange={(e) => setBrandingText(e.target.value)}
+                    placeholder="Ex. Thank you for your order!"
+                    className={`w-full px-3 py-2 text-xs rounded-xl border outline-none transition ${
+                      darkMode 
+                        ? 'bg-slate-950 border-slate-800 focus:border-blue-500 text-slate-200' 
+                        : 'bg-slate-50 border-slate-200 focus:border-blue-500 text-slate-800'
+                    }`}
+                  />
+                </div>
+
+                <div className={`mt-auto p-3 rounded-xl border flex flex-col gap-1 text-[11px] leading-relaxed transition-all ${
+                  darkMode ? 'bg-slate-950/80 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}>
+                  <div className="flex items-center gap-1.5 font-bold text-blue-400">
+                    <Info size={13} />
+                    <span>Feature Guide</span>
+                  </div>
+                  <p>{hoveredTip}</p>
+                </div>
+
+              </div>
+
             </div>
-
-          </div>
-
-        </div>
-
-        {/* 3. Admin Control Center (Only visible to Admin) */}
-        {isAdmin && <AdminPanel activeCount={activeUsersCount} />}
+          </>
+        )}
 
       </main>
 
-      {/* 4. Footer */}
-      <footer className="border-t border-slate-200 bg-white py-3.5 px-6 text-xs text-slate-500">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={15} className="text-emerald-600" />
-            <span>Safe &amp; Secure (Tamaro data server par upload nathi thato)</span>
-          </div>
-          
-          {!isPro && (
-            <div className="flex items-center gap-3">
-              <span className="hidden sm:inline">Ad Space (Thermal Paper Roll)</span>
-              <span className="text-amber-600 font-semibold">Free Plan</span>
-            </div>
-          )}
-        </div>
-      </footer>
+      {/* 3. Features Showcase Section */}
+      <FeaturesSection darkMode={darkMode} />
+
+      {/* 4. Complete Footer */}
+      <Footer darkMode={darkMode} setPlatform={setPlatform} />
 
     </div>
   );
