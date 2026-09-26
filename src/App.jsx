@@ -5,6 +5,16 @@ import Header from './components/Header';
 import FeaturesSection from './components/FeaturesSection';
 import Footer from './components/Footer';
 
+// PDF Tools Components
+import MergePdfTool from './components/pdf-tools/MergePdfTool';
+import SplitPdfTool from './components/pdf-tools/SplitPdfTool';
+import CustomCropTool from './components/pdf-tools/CustomCropTool';
+import RotatePdfTool from './components/pdf-tools/RotatePdfTool';
+import RemovePagesTool from './components/pdf-tools/RemovePagesTool';
+import PageNumberTool from './components/pdf-tools/PageNumberTool';
+import MultiPipelineTool from './components/pdf-tools/MultiPipelineTool';
+import PdfEditorStudio from './components/pdf-tools/editor/PdfEditorStudio';
+
 import { 
   Upload, 
   FileText, 
@@ -54,7 +64,12 @@ export default function App() {
   const [autoDownload, setAutoDownload] = useState(true);
   const [darkenThermal, setDarkenThermal] = useState(false);
   const [brandingText, setBrandingText] = useState('');
-  const [darkMode, setDarkMode] = useState(true);
+
+  // 1. By Default Light/White Theme
+  const [darkMode, setDarkMode] = useState(false);
+
+  // 2. Active Screen View Router ('studio' | 'merge' | 'split' | 'crop' | 'rotate' | 'remove' | 'page-number' | 'editor' | 'multi-pipeline' | 'admin')
+  const [activeView, setActiveView] = useState('studio');
 
   // Admin View Toggle (Controlled via Header)
   const [showAdminView, setShowAdminView] = useState(false);
@@ -110,19 +125,21 @@ export default function App() {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        if (inputBytes && !processing) handleCrop();
+        if (inputBytes && !processing && activeView === 'studio' && !showAdminView) {
+          handleCrop();
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [inputBytes, processing, processingMode, amazonInvoiceMode, amazonSkuMode, printStyleCode, sortBySku, brandingText, autoDownload, darkenThermal]);
+  }, [inputBytes, processing, processingMode, amazonInvoiceMode, amazonSkuMode, printStyleCode, sortBySku, brandingText, autoDownload, darkenThermal, activeView, showAdminView]);
 
   // Live Canvas Preview Reload
   useEffect(() => {
-    if (inputBytes && canvasRef.current) {
+    if (inputBytes && canvasRef.current && activeView === 'studio') {
       renderPreviewCanvas(inputBytes, platform, canvasRef.current, { darkenThermal }).catch(() => {});
     }
-  }, [platform, darkenThermal]);
+  }, [platform, darkenThermal, activeView]);
 
   // Multi-PDF File Upload Handler
   const handleFileChange = async (e) => {
@@ -230,12 +247,17 @@ export default function App() {
     exportManifestToCSV(manifestData, platform);
   };
 
+  const returnToStudio = () => {
+    setActiveView('studio');
+    setShowAdminView(false);
+  };
+
   return (
     <div className={`min-h-screen flex flex-col font-sans transition-colors duration-200 ${
       darkMode ? 'bg-[#0b0f19] text-slate-100' : 'bg-slate-50 text-slate-800'
     }`}>
       
-      {/* 1. Header with Embedded Marketplace Switcher & Admin Button */}
+      {/* 1. Header with Embedded Marketplace Switcher & All PDF Tools */}
       <Header 
         platform={platform}
         setPlatform={setPlatform}
@@ -250,19 +272,21 @@ export default function App() {
         logout={logout}
         showAdminView={showAdminView}
         setShowAdminView={setShowAdminView}
+        activeView={activeView}
+        setActiveView={setActiveView}
       />
 
-      {/* 2. Main Body: Switch between Admin Panel and Studio Workspace */}
+      {/* 2. Main Content Router */}
       <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-5 flex-1">
         
+        {/* A. Admin View Mode */}
         {showAdminView && isAdmin ? (
-          /* Admin View Mode with Live Counts */
           <div className="w-full flex flex-col gap-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-slate-200">System Administration</h2>
+              <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">System Administration</h2>
               <button 
-                onClick={() => setShowAdminView(false)}
-                className="text-xs font-semibold text-blue-400 hover:underline"
+                onClick={returnToStudio}
+                className="text-xs font-semibold text-blue-500 hover:underline"
               >
                 ← Return to Label Studio
               </button>
@@ -273,20 +297,44 @@ export default function App() {
               registeredOnlineCount={registeredOnlineCount}
             />
           </div>
+        ) : activeView === 'merge' ? (
+          /* B. Merge PDF Tool */
+          <MergePdfTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'split' ? (
+          /* C. Split PDF Tool */
+          <SplitPdfTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'crop' ? (
+          /* D. Custom / Selected Crop Tool */
+          <CustomCropTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'rotate' ? (
+          /* E. Rotate PDF Tool */
+          <RotatePdfTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'remove' ? (
+          /* F. Remove Pages Tool */
+          <RemovePagesTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'page-number' ? (
+          /* G. Page Number Tool */
+          <PageNumberTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'editor' ? (
+          /* H. Dedicated Visual PDF Editor */
+          <PdfEditorStudio darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'multi-pipeline' ? (
+          /* I. All-in-One Multi Pipeline Studio */
+          <MultiPipelineTool darkMode={darkMode} onBack={returnToStudio} />
         ) : (
-          /* Regular Cropper Studio View */
+          /* J. Default: Flipkart / Meesho / Amazon Label Studio */
           <>
             {/* Marketplace Information Bar */}
             <div className={`flex items-center justify-between px-4 py-2.5 rounded-xl border text-xs shadow-sm ${
               darkMode ? 'bg-slate-900/60 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-600'
             }`}>
               <div className="flex items-center gap-2">
-                <Sparkles size={14} className="text-amber-400" />
+                <Sparkles size={14} className="text-amber-500" />
                 <span><b className={darkMode ? 'text-white' : 'text-slate-800'}>{activePlatform.name}:</b> {activePlatform.desc}</span>
               </div>
               <div className="hidden sm:flex items-center gap-3">
                 <span className="text-[11px] text-slate-400">Shortcuts: <b>Ctrl+U</b> (Upload) • <b>Ctrl+Enter</b> (Crop)</span>
-                <span className="text-[11px] text-emerald-400 font-semibold">• 100% Client-Side Private</span>
+                <span className="text-[11px] text-emerald-500 font-semibold">• 100% Client-Side Private</span>
               </div>
             </div>
 
@@ -338,13 +386,13 @@ export default function App() {
                     darkMode ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
                   }`}>
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold flex items-center gap-1.5 text-emerald-400">
+                      <span className="font-bold flex items-center gap-1.5 text-emerald-500">
                         <Files size={14} />
                         {files.length} Document(s) Loaded
                       </span>
                       <button 
                         onClick={() => { setFiles([]); setInputBytes(null); setOutputBytes(null); setManifestData([]); }}
-                        className="text-rose-400 hover:text-rose-500 font-semibold"
+                        className="text-rose-500 hover:text-rose-600 font-semibold"
                       >
                         Clear All
                       </button>
@@ -362,9 +410,9 @@ export default function App() {
 
                 <div className={`p-3 rounded-xl border flex items-center gap-2 text-xs ${
                   statusType === 'ok' 
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400' 
                     : statusType === 'warn'
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
                     : darkMode 
                     ? 'bg-slate-800/60 border-slate-700 text-slate-300' 
                     : 'bg-slate-100 border-slate-200 text-slate-600'
@@ -507,7 +555,7 @@ export default function App() {
                           onClick={() => setProcessingMode('label_only')}
                           className={`p-2 rounded-xl border text-center text-xs font-semibold flex flex-col items-center gap-1 transition ${
                             processingMode === 'label_only'
-                              ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                              ? 'border-blue-500 bg-blue-500/10 text-blue-500'
                               : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                           }`}
                         >
@@ -521,7 +569,7 @@ export default function App() {
                           onClick={() => setProcessingMode('single_page')}
                           className={`p-2 rounded-xl border text-center text-xs font-semibold flex flex-col items-center gap-1 transition ${
                             processingMode === 'single_page'
-                              ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                              ? 'border-blue-500 bg-blue-500/10 text-blue-500'
                               : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                           }`}
                         >
@@ -543,7 +591,7 @@ export default function App() {
                             onClick={() => setAmazonInvoiceMode('remove')}
                             className={`p-2 rounded-xl border text-center text-xs font-semibold transition ${
                               amazonInvoiceMode === 'remove'
-                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
                                 : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                             }`}
                           >
@@ -556,7 +604,7 @@ export default function App() {
                             onClick={() => setAmazonInvoiceMode('keep')}
                             className={`p-2 rounded-xl border text-center text-xs font-semibold transition ${
                               amazonInvoiceMode === 'keep'
-                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
                                 : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                             }`}
                           >
@@ -574,7 +622,7 @@ export default function App() {
                             onClick={() => setAmazonSkuMode('id_only')}
                             className={`p-1.5 rounded-lg border text-center text-[11px] font-semibold transition ${
                               amazonSkuMode === 'id_only'
-                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
                                 : darkMode ? 'border-slate-800' : 'border-slate-200'
                             }`}
                           >
@@ -587,7 +635,7 @@ export default function App() {
                             onClick={() => setAmazonSkuMode('with_desc')}
                             className={`p-1.5 rounded-lg border text-center text-[11px] font-semibold transition ${
                               amazonSkuMode === 'with_desc'
-                                ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                                ? 'border-amber-500 bg-amber-500/10 text-amber-500'
                                 : darkMode ? 'border-slate-800' : 'border-slate-200'
                             }`}
                           >
@@ -605,7 +653,7 @@ export default function App() {
                       onClick={() => setPrintStyleCode(!printStyleCode)}
                       className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
                         printStyleCode
-                          ? 'border-pink-500 bg-pink-500/10 text-pink-400'
+                          ? 'border-pink-500 bg-pink-500/10 text-pink-500'
                           : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                       }`}
                     >
@@ -624,7 +672,7 @@ export default function App() {
                       onClick={() => setSortBySku(!sortBySku)}
                       className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
                         sortBySku
-                          ? 'border-amber-500 bg-amber-500/10 text-amber-400'
+                          ? 'border-amber-500 bg-amber-500/10 text-amber-500'
                           : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                       }`}
                     >
@@ -642,7 +690,7 @@ export default function App() {
                     onClick={() => setDarkenThermal(!darkenThermal)}
                     className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
                       darkenThermal
-                        ? 'border-purple-500 bg-purple-500/10 text-purple-400'
+                        ? 'border-purple-500 bg-purple-500/10 text-purple-500'
                         : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
@@ -659,7 +707,7 @@ export default function App() {
                     onClick={() => setAutoDownload(!autoDownload)}
                     className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition text-xs font-semibold ${
                       autoDownload
-                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-500'
                         : darkMode ? 'border-slate-800 hover:border-slate-700' : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
@@ -673,11 +721,11 @@ export default function App() {
                 </div>
 
                 <div 
-                  className="flex flex-col gap-1.5 pt-2 border-t border-slate-800/40"
+                  className="flex flex-col gap-1.5 pt-2 border-t border-slate-200 dark:border-slate-800/40"
                   onMouseEnter={() => setHoveredTip('Custom Label Footer: Custom store name or unboxing notice printed at the bottom margin of each cropped label.')}
                 >
                   <label className="text-[11px] font-bold flex items-center gap-1">
-                    <Tag size={12} className="text-blue-400" />
+                    <Tag size={12} className="text-blue-500" />
                     <span>Custom Label Footer / Branding</span>
                   </label>
                   <input 
@@ -696,7 +744,7 @@ export default function App() {
                 <div className={`mt-auto p-3 rounded-xl border flex flex-col gap-1 text-[11px] leading-relaxed transition-all ${
                   darkMode ? 'bg-slate-950/80 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'
                 }`}>
-                  <div className="flex items-center gap-1.5 font-bold text-blue-400">
+                  <div className="flex items-center gap-1.5 font-bold text-blue-500">
                     <Info size={13} />
                     <span>Feature Guide</span>
                   </div>
