@@ -14,6 +14,8 @@ import RemovePagesTool from './components/pdf-tools/RemovePagesTool';
 import PageNumberTool from './components/pdf-tools/PageNumberTool';
 import MultiPipelineTool from './components/pdf-tools/MultiPipelineTool';
 import PdfEditorStudio from './components/pdf-tools/editor/PdfEditorStudio';
+import ImageToPdfTool from './components/pdf-tools/ImageToPdfTool';
+import PdfToImageTool from './components/pdf-tools/PdfToImageTool';
 
 import { 
   Upload, 
@@ -68,8 +70,64 @@ export default function App() {
   // 1. By Default Light/White Theme
   const [darkMode, setDarkMode] = useState(false);
 
-  // 2. Active Screen View Router ('studio' | 'merge' | 'split' | 'crop' | 'rotate' | 'remove' | 'page-number' | 'editor' | 'multi-pipeline' | 'admin')
-  const [activeView, setActiveView] = useState('studio');
+  // Route Definitions (SEO URL Routing)
+  const viewToPath = {
+    studio: '/',
+    merge: '/merge-pdf',
+    split: '/split-pdf',
+    crop: '/crop-pdf',
+    rotate: '/rotate-pdf',
+    remove: '/remove-pages',
+    'page-number': '/page-number',
+    editor: '/pdf-editor',
+    'multi-pipeline': '/multi-pipeline',
+    'image-to-pdf': '/image-to-pdf',
+    'pdf-to-image': '/pdf-to-image',
+    admin: '/admin'
+  };
+
+  const pathToView = Object.fromEntries(Object.entries(viewToPath).map(([v, p]) => [p, v]));
+
+  // 2. Active Screen View Router initialized from URL
+  const [activeView, setActiveView] = useState(() => {
+    const path = window.location.pathname;
+    return pathToView[path] || 'studio';
+  });
+
+  // Sync State with Browser URL and Update Title dynamically
+  useEffect(() => {
+    const titles = {
+      studio: "Marketplace Label Cropper - MyPDFClub",
+      merge: "Merge PDF Files Online Free - MyPDFClub",
+      split: "Split PDF Pages Online - MyPDFClub",
+      crop: "Custom & Visual PDF Cropper - MyPDFClub",
+      rotate: "Rotate PDF Pages - MyPDFClub",
+      remove: "Remove PDF Pages - MyPDFClub",
+      'page-number': "Add Page Numbers to PDF - MyPDFClub",
+      editor: "Interactive PDF Editor & Signature - MyPDFClub",
+      'multi-pipeline': "All-in-One PDF Multi Studio - MyPDFClub",
+      'image-to-pdf': "Convert Image to PDF - MyPDFClub",
+      'pdf-to-image': "Extract PDF to Image - MyPDFClub",
+      admin: "System Administration - MyPDFClub"
+    };
+
+    document.title = titles[activeView] || "MyPDFClub - Free Online PDF Tools & Shipping Label Cropper";
+
+    const targetPath = viewToPath[activeView] || '/';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState(null, '', targetPath);
+    }
+  }, [activeView]);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      setActiveView(pathToView[path] || 'studio');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Admin View Toggle (Controlled via Header)
   const [showAdminView, setShowAdminView] = useState(false);
@@ -141,6 +199,17 @@ export default function App() {
     }
   }, [platform, darkenThermal, activeView]);
 
+  // GA4 Page View Tracking
+  useEffect(() => {
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'page_view', {
+        page_title: activeView,
+        page_location: window.location.href,
+        page_path: '/' + activeView
+      });
+    }
+  }, [activeView]);
+
   // Multi-PDF File Upload Handler
   const handleFileChange = async (e) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -189,6 +258,24 @@ export default function App() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+
+  const handlePrint = () => {
+    if (!outputBytes) return;
+    const blob = new Blob([outputBytes], { type: 'application/pdf' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = blobUrl;
+    document.body.appendChild(iframe);
+
+    iframe.onload = () => {
+      setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      }, 100);
+    };
   };
 
   const handleCrop = async () => {
@@ -321,8 +408,14 @@ export default function App() {
         ) : activeView === 'multi-pipeline' ? (
           /* I. All-in-One Multi Pipeline Studio */
           <MultiPipelineTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'image-to-pdf' ? (
+          /* J. Image to PDF Tool */
+          <ImageToPdfTool darkMode={darkMode} onBack={returnToStudio} />
+        ) : activeView === 'pdf-to-image' ? (
+          /* K. PDF to Image Tool */
+          <PdfToImageTool darkMode={darkMode} onBack={returnToStudio} />
         ) : (
-          /* J. Default: Flipkart / Meesho / Amazon Label Studio */
+          /* L. Default: Flipkart / Meesho / Amazon Label Studio */
           <>
             {/* Marketplace Information Bar */}
             <div className={`flex items-center justify-between px-4 py-2.5 rounded-xl border text-xs shadow-sm ${
@@ -450,18 +543,34 @@ export default function App() {
                     )}
                   </button>
 
-                  <button
-                    disabled={!outputBytes}
-                    onClick={() => outputBytes && downloadBlob(outputBytes, `${platform}-cropped-batch.pdf`)}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-xs transition ${
-                      outputBytes
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md'
-                        : darkMode ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    <Download size={15} />
-                    <span>Download Cropped PDF</span>
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={!outputBytes}
+                      onClick={() => outputBytes && downloadBlob(outputBytes, `${platform}-cropped-batch.pdf`)}
+                      className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-xs transition ${
+                        outputBytes
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md'
+                          : darkMode ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      }`}
+                    >
+                      <Download size={15} />
+                      <span>Download Cropped PDF</span>
+                    </button>
+
+                    <button
+                      disabled={!outputBytes}
+                      onClick={handlePrint}
+                      className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-xs transition ${
+                        outputBytes
+                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md'
+                          : darkMode ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      }`}
+                      title="Direct Thermal 1-Click Print"
+                    >
+                      <Printer size={15} />
+                      <span>Print Label</span>
+                    </button>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -763,7 +872,12 @@ export default function App() {
       <FeaturesSection darkMode={darkMode} />
 
       {/* 4. Complete Footer */}
-      <Footer darkMode={darkMode} setPlatform={setPlatform} />
+      {/* Passed setActiveView so footer legal links can reset the view properly */}
+      <Footer 
+        darkMode={darkMode} 
+        setPlatform={setPlatform} 
+        setActiveView={setActiveView} 
+      />
 
     </div>
   );

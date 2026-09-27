@@ -15,7 +15,9 @@ import {
   Hash,
   Edit3,
   Sparkles,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Image as ImageIcon,
+  FileImage
 } from 'lucide-react';
 
 export default function Header({
@@ -38,7 +40,7 @@ export default function Header({
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const dropdownRef = useRef(null);
 
-  // PDF Tools List
+  // Updated PDF Tools List with new Image tools
   const pdfTools = [
     { id: 'merge', name: 'Merge PDF', desc: 'Combine multiple PDFs', icon: Files, color: 'text-red-500' },
     { id: 'split', name: 'Split PDF', desc: 'Extract pages or ranges', icon: Scissors, color: 'text-amber-500' },
@@ -47,6 +49,8 @@ export default function Header({
     { id: 'remove', name: 'Remove Pages', desc: 'Delete redundant pages', icon: Trash2, color: 'text-rose-500' },
     { id: 'page-number', name: 'Page Numbers', desc: 'Add Page X of Y', icon: Hash, color: 'text-purple-500' },
     { id: 'editor', name: 'PDF Editor', desc: 'Text, Sign & Stamps', icon: Edit3, color: 'text-sky-500' },
+    { id: 'image-to-pdf', name: 'Image to PDF', desc: 'Convert JPG/PNG to PDF', icon: ImageIcon, color: 'text-indigo-500' },
+    { id: 'pdf-to-image', name: 'PDF to Image', desc: 'Extract pages to JPG', icon: FileImage, color: 'text-orange-500' },
     { id: 'multi-pipeline', name: 'Multi-Tool Studio', desc: 'Combo All-in-One', icon: Sparkles, color: 'text-pink-500' }
   ];
 
@@ -93,7 +97,7 @@ export default function Header({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-black tracking-tight bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  LabelSnap Pro
+                  MyPDFClub
                 </h1>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                   darkMode ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-blue-50 text-blue-600 border-blue-200'
