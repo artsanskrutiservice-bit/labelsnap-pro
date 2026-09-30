@@ -8,9 +8,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 const MM = 72 / 25.4;
 const A4 = { w: 595.28, h: 841.89 };
 
-// Flipkart Label Coordinates
+// ─────────────────────────────────────────────────────────────
+// FLIPKART COORDINATES
+// ─────────────────────────────────────────────────────────────
 const FLIPKART_LABEL = { x: 191, y: 28.5, w: 212.5, h: 352.5 };
 const FLIPKART_MARGIN = 0.5 * MM;
+
 const FLIPKART_CROP = {
   x: FLIPKART_LABEL.x - FLIPKART_MARGIN,
   y: FLIPKART_LABEL.y - FLIPKART_MARGIN,
@@ -18,7 +21,17 @@ const FLIPKART_CROP = {
   h: FLIPKART_LABEL.h + 2 * FLIPKART_MARGIN,
 };
 
-// Meesho Thermal Format Coordinates
+// Flipkart Keep Invoice — covers invoice (left side) + label (right side)
+const FLIPKART_INVOICE_CROP = {
+  x: 20,
+  y: 20,
+  w: 400,
+  h: 400,
+};
+
+// ─────────────────────────────────────────────────────────────
+// MEESHO COORDINATES
+// ─────────────────────────────────────────────────────────────
 const MEESHO_BOTTOM_EXTRA = 2 * MM;
 const MEESHO_OUTPUT = { w: 595, h: 348.2 + MEESHO_BOTTOM_EXTRA };
 const MEESHO_CROP = {
@@ -28,7 +41,12 @@ const MEESHO_CROP = {
   h: 348.2 + MEESHO_BOTTOM_EXTRA,
 };
 
-// Amazon Crop Coordinates
+// ✅ Tight Crop for Meesho "Keep Invoice" — calibrated from demo.pdf → outpu.pdf
+const INVOICE_TIGHT_CROP = { x: 0, y: 5, w: 595, h: 615 };
+
+// ─────────────────────────────────────────────────────────────
+// AMAZON COORDINATES
+// ─────────────────────────────────────────────────────────────
 const AMAZON_CROP = { x: 17, y: 12, w: 561, h: 830 };
 
 // Amazon Invoice & Item Details Extraction
@@ -42,11 +60,9 @@ async function extractAmazonInvoiceInfo(pdfjsDoc, invoicePageNum) {
     let sku = '';
     let description = '';
 
-    // 1. ASIN bracket check
     const match1 = text.match(/\bB0[A-Z0-9]{8}\b[^(]*\(([^)]+)\)/i);
     if (match1 && match1[1]) sku = match1[1].trim();
 
-    // 2. Fallback description block
     const match2 = text.match(/Description[\s\S]*?:\s*([^\n\r(]+)/i);
     if (match2 && match2[1]) description = match2[1].trim();
 
@@ -60,7 +76,6 @@ async function extractAmazonInvoiceInfo(pdfjsDoc, invoicePageNum) {
       if (match3 && match3[1]) sku = match3[1].trim();
     }
 
-    // Quantity Extraction
     let qty = '1';
     const qtyMatch = text.match(/HSN\s*:\s*\d+\s+₹?[\d,.]+\s+(\d+)\s+₹?[\d,.]+/i);
     if (qtyMatch && qtyMatch[1]) {
@@ -106,18 +121,28 @@ async function extractMeeshoItemDetails(pdfjsDoc, pageNum) {
   }
 }
 
-// Live Preview Canvas Generator
+// ─────────────────────────────────────────────────────────────
+// LIVE PREVIEW CANVAS GENERATOR (processingMode-aware)
+// ─────────────────────────────────────────────────────────────
 export async function renderPreviewCanvas(inputBytes, platform, canvas, options = {}) {
-  const { darkenThermal = false } = options;
+  const { darkenThermal = false, processingMode = 'label_only' } = options;
+
   const loading = pdfjsLib.getDocument({ data: inputBytes.slice() });
   const doc = await loading.promise;
   const page = await doc.getPage(1);
   const scale = 1.6;
   const vp = page.getViewport({ scale });
 
+  // Pick the correct crop based on platform + mode
   let activeCrop = FLIPKART_CROP;
-  if (platform === 'meesho') activeCrop = MEESHO_CROP;
-  if (platform === 'amazon') activeCrop = AMAZON_CROP;
+
+  if (platform === 'flipkart') {
+    activeCrop = processingMode === 'keep_invoice' ? FLIPKART_INVOICE_CROP : FLIPKART_CROP;
+  } else if (platform === 'meesho') {
+    activeCrop = processingMode === 'keep_invoice' ? INVOICE_TIGHT_CROP : MEESHO_CROP;
+  } else if (platform === 'amazon') {
+    activeCrop = AMAZON_CROP;
+  }
 
   const sx = activeCrop.x * scale, sy = activeCrop.y * scale;
   const sw = activeCrop.w * scale, sh = activeCrop.h * scale;
@@ -131,11 +156,7 @@ export async function renderPreviewCanvas(inputBytes, platform, canvas, options 
   canvas.height = Math.ceil(sh);
   const ctx = canvas.getContext('2d');
 
-  if (darkenThermal) {
-    ctx.filter = 'contrast(140%) brightness(95%)';
-  } else {
-    ctx.filter = 'none';
-  }
+  ctx.filter = darkenThermal ? 'contrast(140%) brightness(95%)' : 'none';
 
   if (platform === 'amazon') {
     ctx.drawImage(full, sx, sy, sw, sh, 0, 0, sw, sh);
@@ -203,32 +224,17 @@ export async function generatePickListPDF(manifestItems, platformName) {
   let y = height - 40;
 
   page.drawText(`${platformName.toUpperCase()} DISPATCH PICK-LIST SUMMARY`, {
-    x: 40,
-    y,
-    size: 14,
-    font: fontBold,
-    color: rgb(0.1, 0.1, 0.1),
+    x: 40, y, size: 14, font: fontBold, color: rgb(0.1, 0.1, 0.1),
   });
   y -= 18;
 
   const dateStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
   page.drawText(`Generated on: ${dateStr} | Total Unique SKUs: ${manifestItems.length}`, {
-    x: 40,
-    y,
-    size: 9,
-    font: fontRegular,
-    color: rgb(0.4, 0.4, 0.4),
+    x: 40, y, size: 9, font: fontRegular, color: rgb(0.4, 0.4, 0.4),
   });
   y -= 25;
 
-  page.drawRectangle({
-    x: 40,
-    y: y - 5,
-    width: width - 80,
-    height: 22,
-    color: rgb(0.92, 0.94, 0.96),
-  });
-
+  page.drawRectangle({ x: 40, y: y - 5, width: width - 80, height: 22, color: rgb(0.92, 0.94, 0.96) });
   page.drawText('SR', { x: 48, y: y + 2, size: 9, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
   page.drawText('SKU CODE / ITEM DETAILS', { x: 80, y: y + 2, size: 9, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
   page.drawText('QUANTITY', { x: width - 120, y: y + 2, size: 9, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
@@ -241,13 +247,7 @@ export async function generatePickListPDF(manifestItems, platformName) {
     totalQtySum += qtyNum;
 
     if (index % 2 === 1) {
-      page.drawRectangle({
-        x: 40,
-        y: y - 4,
-        width: width - 80,
-        height: 18,
-        color: rgb(0.97, 0.98, 0.99),
-      });
+      page.drawRectangle({ x: 40, y: y - 4, width: width - 80, height: 18, color: rgb(0.97, 0.98, 0.99) });
     }
 
     page.drawText(String(index + 1), { x: 48, y: y + 1, size: 8, font: fontRegular, color: rgb(0.2, 0.2, 0.2) });
@@ -261,31 +261,24 @@ export async function generatePickListPDF(manifestItems, platformName) {
   });
 
   y -= 10;
-  page.drawLine({
-    start: { x: 40, y: y + 10 },
-    end: { x: width - 40, y: y + 10 },
-    thickness: 1,
-    color: rgb(0.8, 0.8, 0.8),
-  });
+  page.drawLine({ start: { x: 40, y: y + 10 }, end: { x: width - 40, y: y + 10 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
 
   page.drawText(`TOTAL DISPATCH ITEMS: ${totalQtySum} Units`, {
-    x: width - 210,
-    y: y - 2,
-    size: 10,
-    font: fontBold,
-    color: rgb(0.1, 0.4, 0.2),
+    x: width - 210, y: y - 2, size: 10, font: fontBold, color: rgb(0.1, 0.4, 0.2),
   });
 
   return await doc.save();
 }
 
-// Master Process Labels Engine
+// ─────────────────────────────────────────────────────────────
+// MASTER PROCESS LABELS ENGINE
+// ─────────────────────────────────────────────────────────────
 export async function processLabels(inputBytes, platform, onProgress, options = {}) {
   const { 
-    processingMode = 'label_only', // 'label_only' | 'single_page' | 'split_pages'[cite: 2, 4]
-    amazonInvoiceMode = 'remove',   // 'remove' | 'keep'[cite: 3]
-    amazonSkuMode = 'id_only',     // 'id_only' | 'with_desc'[cite: 3]
-    printStyleCode = false,         // Meesho SKU & Size print[cite: 4]
+    processingMode = 'label_only',
+    amazonInvoiceMode = 'remove',
+    amazonSkuMode = 'id_only',
+    printStyleCode = false,
     sortBySku = false, 
     brandingText = '',
     darkenThermal = false 
@@ -353,7 +346,6 @@ export async function processLabels(inputBytes, platform, onProgress, options = 
         page.drawPage(embedded, { x: 0, y: 0, width: outputW, height: outputH, opacity: 0.25 });
       }
 
-      // Print SKU Title
       page.drawText('SKU:', { x: 10, y: outputH - 16, size: 9, font: fontBold, color: rgb(0, 0, 0) });
 
       let skuDisplay = item.sku;
@@ -372,17 +364,11 @@ export async function processLabels(inputBytes, platform, onProgress, options = 
 
       if (brandingText.trim()) {
         page.drawText(brandingText.trim(), {
-          x: 15,
-          y: 8,
-          size: 7.5,
-          font: fontRegular,
-          color: rgb(0.2, 0.2, 0.2),
+          x: 15, y: 8, size: 7.5, font: fontRegular, color: rgb(0.2, 0.2, 0.2),
         });
       }
 
-      // If user chose "Keep Invoice"[cite: 3]
       if (amazonInvoiceMode === 'keep') {
-        const invPage = src.getPage(item.invoicePageIndex);
         const [copiedInv] = await out.copyPages(src, [item.invoicePageIndex]);
         out.addPage(copiedInv);
       }
@@ -401,12 +387,28 @@ export async function processLabels(inputBytes, platform, onProgress, options = 
       }
 
       if (processingMode === 'single_page') {
-        // Single Page: Label + Invoice together on A4 to avoid penalties[cite: 4]
-        const page = out.addPage([A4.w, A4.h]);
+        // Original Single Page
         const [copiedFullPage] = await out.copyPages(src, [i]);
-        page.drawPage(copiedFullPage, { x: 0, y: 0, width: A4.w, height: A4.h });
+        out.addPage(copiedFullPage);
+
+      } else if (processingMode === 'keep_invoice') {
+        // Meesho Keep Invoice — Tight Crop (calibrated: demo.pdf → outpu.pdf)
+        const embedded = await out.embedPage(sourcePage, {
+          left: INVOICE_TIGHT_CROP.x,
+          bottom: A4.h - INVOICE_TIGHT_CROP.y - INVOICE_TIGHT_CROP.h,
+          right: INVOICE_TIGHT_CROP.x + INVOICE_TIGHT_CROP.w,
+          top: A4.h - INVOICE_TIGHT_CROP.y,
+        });
+
+        const page = out.addPage([INVOICE_TIGHT_CROP.w, INVOICE_TIGHT_CROP.h]);
+        page.drawPage(embedded, { x: 0, y: 0, width: INVOICE_TIGHT_CROP.w, height: INVOICE_TIGHT_CROP.h });
+
+        if (darkenThermal) {
+          page.drawPage(embedded, { x: 0, y: 0, width: INVOICE_TIGHT_CROP.w, height: INVOICE_TIGHT_CROP.h, opacity: 0.25 });
+        }
+
       } else {
-        // Label Only (Thermal 4x6 default)[cite: 4]
+        // Label Only
         const embedded = await out.embedPage(sourcePage, {
           left: MEESHO_CROP.x,
           bottom: A4.h - MEESHO_CROP.y - MEESHO_CROP.h,
@@ -421,29 +423,22 @@ export async function processLabels(inputBytes, platform, onProgress, options = 
           page.drawPage(embedded, { x: 0, y: 0, width: MEESHO_OUTPUT.w, height: MEESHO_OUTPUT.h, opacity: 0.25 });
         }
 
-        // Print Style Code & Size[cite: 4]
         if (printStyleCode && itemDetail.styleCode !== 'N/A') {
           const detailText = `STYLE: ${itemDetail.styleCode} ${itemDetail.size ? `| SIZE: ${itemDetail.size}` : ''}`;
           page.drawText(detailText, {
-            x: 10,
-            y: 5,
-            size: 8,
-            font: fontBold,
-            color: rgb(0, 0, 0),
+            x: 10, y: 5, size: 8, font: fontBold, color: rgb(0, 0, 0),
           });
         } else if (brandingText.trim()) {
           page.drawText(brandingText.trim(), {
-            x: 10,
-            y: 5,
-            size: 7,
-            font: fontRegular,
-            color: rgb(0.2, 0.2, 0.2),
+            x: 10, y: 5, size: 7, font: fontRegular, color: rgb(0.2, 0.2, 0.2),
           });
         }
       }
     }
   } else {
-    // Flipkart Modes[cite: 2]
+    // ─────────────────────────────────────────────────────────
+    // FLIPKART MODES
+    // ─────────────────────────────────────────────────────────
     manifestData = [{ sku: 'Flipkart Batch Orders', qty: total }];
 
     for (let i = 0; i < total; i++) {
@@ -451,11 +446,34 @@ export async function processLabels(inputBytes, platform, onProgress, options = 
       const sourcePage = src.getPage(i);
 
       if (processingMode === 'single_page') {
-        // Full Single Page mode[cite: 2]
+        // Full Single Page
         const [copiedFull] = await out.copyPages(src, [i]);
         out.addPage(copiedFull);
+
+      } else if (processingMode === 'keep_invoice') {
+        // Flipkart Keep Invoice — tight crop covering invoice + label
+        const embedded = await out.embedPage(sourcePage, {
+          left: FLIPKART_INVOICE_CROP.x,
+          bottom: A4.h - FLIPKART_INVOICE_CROP.y - FLIPKART_INVOICE_CROP.h,
+          right: FLIPKART_INVOICE_CROP.x + FLIPKART_INVOICE_CROP.w,
+          top: A4.h - FLIPKART_INVOICE_CROP.y,
+        });
+
+        const page = out.addPage([FLIPKART_INVOICE_CROP.w, FLIPKART_INVOICE_CROP.h]);
+        page.drawPage(embedded, { x: 0, y: 0, width: FLIPKART_INVOICE_CROP.w, height: FLIPKART_INVOICE_CROP.h });
+
+        if (darkenThermal) {
+          page.drawPage(embedded, { x: 0, y: 0, width: FLIPKART_INVOICE_CROP.w, height: FLIPKART_INVOICE_CROP.h, opacity: 0.25 });
+        }
+
+        if (brandingText.trim()) {
+          page.drawText(brandingText.trim(), {
+            x: 8, y: 5, size: 7, font: fontRegular, color: rgb(0.2, 0.2, 0.2),
+          });
+        }
+
       } else {
-        // Label Only Cropped[cite: 2]
+        // Label Only Cropped (default)
         const embedded = await out.embedPage(sourcePage, {
           left: FLIPKART_CROP.x,
           bottom: A4.h - FLIPKART_CROP.y - FLIPKART_CROP.h,
@@ -477,9 +495,7 @@ export async function processLabels(inputBytes, platform, onProgress, options = 
           page.drawText(brandingText.trim(), {
             x: (A4.w - w) / 2,
             y: (A4.h - h) / 2 - 14,
-            size: 8,
-            font: fontRegular,
-            color: rgb(0.2, 0.2, 0.2),
+            size: 8, font: fontRegular, color: rgb(0.2, 0.2, 0.2),
           });
         }
       }

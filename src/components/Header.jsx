@@ -85,15 +85,19 @@ export default function Header({
     }`}>
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
         
-        {/* 1. Logo & Branding */}
+      {/* 1. Logo & Branding */}
         <div className="flex items-center justify-between w-full md:w-auto">
           <div 
             onClick={() => { if (setActiveView) setActiveView('studio'); if (setShowAdminView) setShowAdminView(false); }}
             className="flex items-center gap-3 cursor-pointer select-none"
           >
-            <div className={`p-2 rounded-xl ${activePlatform?.activeBg || 'bg-red-600'} text-white shadow-md transition-colors duration-300`}>
-              <Scissors size={20} />
+            
+            {/* અહી જૂના Scissors આઇકોનની જગ્યાએ તમારો નવો Canva લોગો આવી ગયો */}
+            <div className="flex items-center justify-center shrink-0">
+              <img src="/logo.png" alt="MyPDFClub Logo" className="h-10 w-auto object-contain" />
             </div>
+
+            {/* વેબસાઈટનું નામ અને બેજ */}
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-black tracking-tight bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
@@ -107,6 +111,7 @@ export default function Header({
               </div>
               <p className={`text-[11px] ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Smart E-Commerce &amp; PDF Suite</p>
             </div>
+
           </div>
 
           {/* Mobile Admin & Theme Controls */}
