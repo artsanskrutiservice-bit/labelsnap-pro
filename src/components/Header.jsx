@@ -1,24 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
-  Scissors, 
-  Sun, 
-  Moon, 
-  LogIn, 
-  LogOut, 
-  ShieldAlert, 
-  ArrowLeft,
-  ChevronDown,
-  Files,
-  Crop,
-  RotateCw,
-  Trash2,
-  Hash,
-  Edit3,
-  Sparkles,
-  FileSpreadsheet,
-  Image as ImageIcon,
-  FileImage,
-  FileText
+  Scissors, Sun, Moon, LogIn, LogOut, ShieldAlert, ArrowLeft,
+  ChevronDown, Files, Crop, RotateCw, Trash2, Hash, Edit3,
+  Sparkles, Image as ImageIcon, FileImage
 } from 'lucide-react';
 
 export default function Header({
@@ -26,7 +10,7 @@ export default function Header({
   setPlatform,
   platforms,
   activePlatform,
-  darkMode = false, // By default Light/White mode
+  darkMode = false,
   setDarkMode,
   currentUser,
   isAdmin,
@@ -39,22 +23,28 @@ export default function Header({
   setActiveView
 }) {
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+  const [themeIconKey, setThemeIconKey] = useState(0);
+  const [scrolled, setScrolled] = useState(false);
+  const [navIndicator, setNavIndicator] = useState({ left: 0, width: 0, bg: 'bg-blue-600' });
+  
   const dropdownRef = useRef(null);
+  const navRef = useRef(null);
+  const btnRefs = useRef({});
 
-  // Updated PDF Tools List — "Merge PDF" removed (now direct button)
+  // ─── PDF Tools List ───────────────────────────────────────
   const pdfTools = [
-    { id: 'split', name: 'Split PDF', desc: 'Extract pages or ranges', icon: Scissors, color: 'text-amber-500' },
-    { id: 'crop', name: 'Selected Crop', desc: 'Visual box / preset crop', icon: Crop, color: 'text-emerald-500' },
-    { id: 'rotate', name: 'Rotate PDF', desc: 'Rotate pages 90° / 180°', icon: RotateCw, color: 'text-blue-500' },
-    { id: 'remove', name: 'Remove Pages', desc: 'Delete redundant pages', icon: Trash2, color: 'text-rose-500' },
-    { id: 'page-number', name: 'Page Numbers', desc: 'Add Page X of Y', icon: Hash, color: 'text-purple-500' },
-    { id: 'editor', name: 'PDF Editor', desc: 'Text, Sign & Stamps', icon: Edit3, color: 'text-sky-500' },
-    { id: 'image-to-pdf', name: 'Image to PDF', desc: 'Convert JPG/PNG to PDF', icon: ImageIcon, color: 'text-indigo-500' },
-    { id: 'pdf-to-image', name: 'PDF to Image', desc: 'Extract pages to JPG', icon: FileImage, color: 'text-orange-500' },
-    { id: 'multi-pipeline', name: 'Multi-Tool Studio', desc: 'Combo All-in-One', icon: Sparkles, color: 'text-pink-500' }
+    { id: 'split', name: 'Split PDF', desc: 'Extract pages', icon: Scissors, color: 'text-amber-500' },
+    { id: 'crop', name: 'Selected Crop', desc: 'Visual box crop', icon: Crop, color: 'text-emerald-500' },
+    { id: 'rotate', name: 'Rotate PDF', desc: 'Rotate 90°/180°', icon: RotateCw, color: 'text-blue-500' },
+    { id: 'remove', name: 'Remove Pages', desc: 'Delete pages', icon: Trash2, color: 'text-rose-500' },
+    { id: 'page-number', name: 'Page Numbers', desc: 'Add X of Y', icon: Hash, color: 'text-purple-500' },
+    { id: 'editor', name: 'PDF Editor', desc: 'Text & Signs', icon: Edit3, color: 'text-sky-500' },
+    { id: 'image-to-pdf', name: 'Image → PDF', desc: 'JPG/PNG', icon: ImageIcon, color: 'text-indigo-500' },
+    { id: 'pdf-to-image', name: 'PDF → Image', desc: 'Extract pages', icon: FileImage, color: 'text-orange-500' },
+    { id: 'multi-pipeline', name: 'Multi Studio', desc: 'All-in-One', icon: Sparkles, color: 'text-pink-500' }
   ];
 
-  // Close dropdown on click outside
+  // ─── Click Outside Dropdown ───────────────────────────────
   useEffect(() => {
     function handleClickOutside(event) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -65,6 +55,49 @@ export default function Header({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // ─── Scroll Shrink Effect ─────────────────────────────────
+  useEffect(() => {
+    const handleScroll = () => setScrolled(window.scrollY > 20);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // ─── Sliding Indicator Update ─────────────────────────────
+  const updateIndicator = useCallback(() => {
+    const activeKey = 
+      activeView === 'merge' ? 'merge' :
+      activeView === 'studio' ? platform :
+      null;
+
+    if (!activeKey || !btnRefs.current[activeKey] || !navRef.current) return;
+
+    const btn = btnRefs.current[activeKey];
+    const nav = navRef.current;
+    const btnRect = btn.getBoundingClientRect();
+    const navRect = nav.getBoundingClientRect();
+
+    setNavIndicator({
+      left: btnRect.left - navRect.left,
+      width: btnRect.width,
+      bg: activeKey === 'merge' 
+        ? 'bg-indigo-600' 
+        : (activePlatform?.activeBg || 'bg-blue-600')
+    });
+  }, [activeView, platform, activePlatform]);
+
+  useEffect(() => {
+    updateIndicator();
+    window.addEventListener('resize', updateIndicator);
+    // Small delay for initial mount to get correct dimensions
+    const timer = setTimeout(updateIndicator, 100);
+    return () => {
+      window.removeEventListener('resize', updateIndicator);
+      clearTimeout(timer);
+    };
+  }, [updateIndicator]);
+
+  // ─── Handlers ─────────────────────────────────────────────
   const handleSelectTool = (toolId) => {
     if (setActiveView) setActiveView(toolId);
     if (setShowAdminView) setShowAdminView(false);
@@ -77,86 +110,347 @@ export default function Header({
     setPlatform(platformId);
   };
 
-  const isToolActive = activeView && activeView !== 'studio' && !showAdminView;
+  const handleSelectMerge = () => {
+    if (setActiveView) setActiveView('merge');
+    if (setShowAdminView) setShowAdminView(false);
+  };
+
+  const handleToggleTheme = () => {
+    setDarkMode(!darkMode);
+    setThemeIconKey((prev) => prev + 1);
+  };
+
+  const handleGoHome = () => {
+    if (setActiveView) setActiveView('studio');
+    if (setShowAdminView) setShowAdminView(false);
+  };
+
+  const isToolActive = activeView && activeView !== 'studio' && activeView !== 'merge' && !showAdminView;
   const isMergeActive = activeView === 'merge' && !showAdminView;
 
+  // ─── Style tokens ─────────────────────────────────────────
+  const divider = darkMode ? 'bg-white/[0.08]' : 'bg-slate-300/70';
+  const btnBase = darkMode 
+    ? 'bg-white/[0.04] border-white/[0.08] text-slate-300 hover:bg-white/[0.08] hover:border-white/[0.12]' 
+    : 'bg-white/80 border-slate-200/80 text-slate-700 hover:bg-white hover:border-slate-300';
+
   return (
-    <header className={`border-b px-4 sm:px-6 py-3 sticky top-0 z-50 backdrop-blur-md transition-colors ${
-      darkMode ? 'bg-[#0f172a]/95 border-slate-800 text-white' : 'bg-white/95 border-slate-200 text-slate-800'
-    }`}>
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-        
-      {/* 1. Logo & Branding */}
-        <div className="flex items-center justify-between w-full md:w-auto">
-          <div 
-            onClick={() => { if (setActiveView) setActiveView('studio'); if (setShowAdminView) setShowAdminView(false); }}
-            className="flex items-center gap-3 cursor-pointer select-none"
-          >
+    <>
+      {/* ═══════════ BACKDROP DIMMING ═══════════ */}
+      {showToolsDropdown && (
+        <div 
+          className="backdrop-dim" 
+          onClick={() => setShowToolsDropdown(false)}
+        />
+      )}
+
+      {/* ═══════════ FLOATING HEADER ═══════════ */}
+      <div className={`header-floating ${scrolled ? 'scrolled' : ''}`}>
+        <header className={`header-pill ${scrolled ? 'scrolled' : ''} ${darkMode ? 'dark' : 'light'}`}>
+          <div className="flex items-center justify-between gap-4 px-4 sm:px-5 py-2.5">
             
-            {/* Logo */}
-            <div className="flex items-center justify-center shrink-0">
-              <img src="/logo.png" alt="MyPDFClub Logo" className="h-10 w-auto object-contain" />
-            </div>
-
-            {/* Brand Name & Badge */}
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-black tracking-tight bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  MyPDFClub
-                </h1>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                  darkMode ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-blue-50 text-blue-600 border-blue-200'
-                }`}>
-                  v2.0
-                </span>
+            {/* ═══════════════ 1. LEFT ZONE — BRAND ═══════════════ */}
+            <div 
+              onClick={handleGoHome}
+              className="flex items-center gap-3 cursor-pointer select-none logo-hover group shrink-0"
+            >
+              {/* Logo with glow */}
+              <div className="relative flex items-center justify-center shrink-0">
+                <div className={`absolute inset-0 rounded-xl blur-lg opacity-0 transition-opacity duration-300 group-hover:opacity-60 ${
+                  darkMode ? 'bg-indigo-500/40' : 'bg-indigo-400/30'
+                }`}></div>
+                <img 
+                  src="/logo.png" 
+                  alt="MyPDFClub" 
+                  className="logo-img relative h-9 w-auto object-contain transition-transform duration-300" 
+                />
               </div>
-              <p className={`text-[11px] ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Smart E-Commerce &amp; PDF Suite</p>
+
+              {/* Brand Name */}
+              <div className="hidden sm:block">
+                <div className="flex items-center gap-2">
+                  <h1 className={`text-base font-black tracking-tight logo-shimmer ${
+                    darkMode ? 'logo-shimmer-dark' : 'logo-shimmer-light'
+                  }`}>
+                    MyPDFClub
+                  </h1>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border float-badge ${
+                    darkMode 
+                      ? 'bg-blue-500/10 text-blue-300 border-blue-500/25' 
+                      : 'bg-blue-50 text-blue-600 border-blue-200/70'
+                  }`}>
+                    v2.0
+                  </span>
+                </div>
+                <p className={`text-[10px] font-medium leading-tight ${
+                  darkMode ? 'text-slate-400' : 'text-slate-500'
+                }`}>
+                  Smart PDF Suite
+                </p>
+              </div>
             </div>
 
-          </div>
-
-          {/* Mobile Admin & Theme Controls */}
-          <div className="flex md:hidden items-center gap-2">
-            {isAdmin && (
-              <button
-                onClick={() => setShowAdminView(!showAdminView)}
-                className={`p-2 rounded-xl border text-xs font-bold flex items-center gap-1 ${
-                  showAdminView 
-                    ? 'bg-amber-500/20 border-amber-500/40 text-amber-500' 
-                    : darkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-700'
+            {/* ═══════════════ 2. CENTER ZONE — NAVIGATION PILL ═══════════════ */}
+            {!showAdminView && (
+              <nav 
+                ref={navRef}
+                className={`sliding-nav hidden md:flex ${
+                  darkMode 
+                    ? 'bg-white/[0.04] border border-white/[0.06]' 
+                    : 'bg-slate-100/70 border border-slate-200/60'
                 }`}
               >
-                <ShieldAlert size={14} />
-              </button>
+                {/* Sliding Indicator */}
+                <div 
+                  className={`sliding-nav-indicator ${navIndicator.bg}`}
+                  style={{
+                    transform: `translateX(${navIndicator.left}px)`,
+                    width: `${navIndicator.width}px`,
+                    left: 0
+                  }}
+                />
+
+                {/* Platform Buttons */}
+                {platforms?.map((p) => {
+                  const isActive = platform === p.id && (!activeView || activeView === 'studio');
+                  return (
+                    <button
+                      key={p.id}
+                      ref={(el) => { btnRefs.current[p.id] = el; }}
+                      onClick={() => handleSelectPlatform(p.id)}
+                      className={`sliding-nav-btn py-1.5 px-3.5 rounded-full text-xs font-bold ${
+                        isActive 
+                          ? 'text-white' 
+                          : darkMode 
+                            ? 'text-slate-400 hover:text-white' 
+                            : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {p.name}
+                    </button>
+                  );
+                })}
+
+                {/* Merge PDF */}
+                <button
+                  ref={(el) => { btnRefs.current['merge'] = el; }}
+                  onClick={handleSelectMerge}
+                  className={`sliding-nav-btn py-1.5 px-3.5 rounded-full text-xs font-bold flex items-center gap-1.5 ${
+                    isMergeActive 
+                      ? 'text-white' 
+                      : darkMode 
+                        ? 'text-slate-400 hover:text-white' 
+                        : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Files size={12} />
+                  <span>Merge PDF</span>
+                </button>
+              </nav>
             )}
 
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              className={`p-2 rounded-xl border transition ${
-                darkMode ? 'bg-slate-800 border-slate-700 text-amber-400' : 'bg-slate-100 border-slate-200 text-slate-600'
-              }`}
-            >
-              {darkMode ? <Sun size={15} /> : <Moon size={15} />}
-            </button>
-
-            {currentUser ? (
-              <button onClick={logout} className="p-2 rounded-xl border border-rose-500/30 text-rose-500">
-                <LogOut size={15} />
-              </button>
-            ) : (
-              <button onClick={loginWithGoogle} className="p-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
-                <LogIn size={15} />
-              </button>
+            {/* Mobile menu indicator */}
+            {showAdminView && (
+              <div className={`flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-full border ${
+                darkMode 
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' 
+                  : 'border-amber-300/70 bg-amber-50 text-amber-700'
+              }`}>
+                <ShieldAlert size={14} className="animate-pulse" />
+                <span>Admin Mode</span>
+              </div>
             )}
+
+            {/* ═══════════════ 3. RIGHT ZONE — TOOLS & PROFILE ═══════════════ */}
+            <div className="flex items-center gap-2 shrink-0">
+              
+              {/* Admin Button (Desktop) */}
+              {isAdmin && (
+                <button
+                  onClick={() => setShowAdminView(!showAdminView)}
+                  className={`hidden sm:flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border btn-lift ${
+                    showAdminView 
+                      ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/30' 
+                      : darkMode
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/25 hover:bg-amber-500/20'
+                      : 'bg-amber-50 text-amber-700 border-amber-200/70 hover:bg-amber-100'
+                  }`}
+                >
+                  {showAdminView ? <ArrowLeft size={13} /> : <ShieldAlert size={13} />}
+                </button>
+              )}
+
+              {/* PDF Tools Dropdown */}
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowToolsDropdown((prev) => !prev)}
+                  className={`py-2 px-3 rounded-xl text-xs font-black transition-all duration-300 flex items-center gap-1.5 border btn-lift sparkle-wiggle ${
+                    isToolActive
+                      ? 'bg-gradient-to-br from-red-500 to-rose-600 text-white border-red-600 shadow-lg shadow-red-500/30'
+                      : showToolsDropdown
+                      ? darkMode 
+                        ? 'bg-white/[0.08] border-white/[0.12] text-white' 
+                        : 'bg-white border-slate-300 text-slate-900 ring-2 ring-red-500/15'
+                      : btnBase
+                  }`}
+                >
+                  <Sparkles 
+                    size={13} 
+                    className={`transition-all duration-300 ${isToolActive ? 'text-white' : 'text-red-500'}`} 
+                  />
+                  <span className="hidden sm:inline">PDF Tools</span>
+                  <ChevronDown 
+                    size={12} 
+                    className={`chevron-smooth ${showToolsDropdown ? 'rotate-180' : 'rotate-0'}`} 
+                  />
+                </button>
+
+                {/* ──── DROPDOWN (2-COLUMN) ──── */}
+                {showToolsDropdown && (
+                  <div className={`absolute top-full right-0 mt-3 w-[340px] sm:w-[420px] rounded-2xl border p-2 z-50 animate-dropdown-in ${
+                    darkMode 
+                      ? 'bg-[#0f1420]/98 backdrop-blur-2xl border-white/[0.08] shadow-2xl shadow-black/60' 
+                      : 'bg-white/98 backdrop-blur-2xl border-slate-200/80 shadow-2xl shadow-slate-400/20'
+                  }`}>
+                    {/* Header */}
+                    <div className={`px-3 py-2 mb-1 text-[10px] font-black uppercase tracking-[0.1em] flex items-center justify-between border-b ${
+                      darkMode 
+                        ? 'text-slate-500 border-white/[0.06]' 
+                        : 'text-slate-400 border-slate-100'
+                    }`}>
+                      <span>⚡ PDF Utilities</span>
+                      <span className="text-[9px] font-bold text-emerald-500">100% CLIENT-SIDE</span>
+                    </div>
+
+                    {/* 2-Column Grid */}
+                    <div className="grid grid-cols-2 gap-1">
+                      {pdfTools.map((tool, index) => {
+                        const Icon = tool.icon;
+                        const isSelected = activeView === tool.id;
+                        return (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            onClick={() => handleSelectTool(tool.id)}
+                            style={{ animationDelay: `${index * 25}ms` }}
+                            className={`p-2 rounded-xl text-left flex items-center gap-2.5 transition-all duration-200 animate-tool-item group/item ${
+                              isSelected
+                                ? darkMode 
+                                  ? 'bg-gradient-to-r from-red-500/15 to-rose-500/10 border border-red-500/25' 
+                                  : 'bg-gradient-to-r from-red-50 to-rose-50 border border-red-200/60'
+                                : darkMode
+                                ? 'hover:bg-white/[0.05] border border-transparent'
+                                : 'hover:bg-slate-50 border border-transparent'
+                            }`}
+                          >
+                            <div className={`icon-container p-1.5 rounded-lg shrink-0 ${
+                              darkMode ? 'bg-white/[0.05]' : 'bg-slate-100'
+                            } ${tool.color}`}>
+                              <Icon size={14} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className={`text-[11px] font-bold leading-tight truncate ${
+                                isSelected 
+                                  ? 'text-red-600 dark:text-red-400' 
+                                  : darkMode ? 'text-slate-200' : 'text-slate-800'
+                              }`}>
+                                {tool.name}
+                              </p>
+                              <p className={`text-[9px] leading-tight truncate ${
+                                darkMode ? 'text-slate-500' : 'text-slate-500'
+                              }`}>
+                                {tool.desc}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className={`w-px h-6 hidden sm:block divider-animate ${divider}`}></div>
+
+              {/* Theme Toggle */}
+              <button
+                onClick={handleToggleTheme}
+                className={`p-2 rounded-xl border btn-lift ${
+                  darkMode 
+                    ? 'bg-white/[0.04] border-white/[0.08] text-amber-400 hover:bg-white/[0.08]' 
+                    : 'bg-slate-100/80 border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+                title="Toggle Theme"
+              >
+                <div key={themeIconKey} className="icon-spin">
+                  {darkMode ? <Sun size={15} /> : <Moon size={15} />}
+                </div>
+              </button>
+
+              {/* User Profile / Sign In */}
+              {currentUser ? (
+                <div className={`hidden sm:flex items-center gap-2 border pl-2.5 pr-1.5 py-1 rounded-xl profile-hover ${
+                  darkMode 
+                    ? 'bg-white/[0.04] border-white/[0.08]' 
+                    : 'bg-white/80 border-slate-200/80'
+                }`}>
+                  <div className="flex flex-col text-right leading-tight">
+                    <span className="text-[11px] font-semibold truncate max-w-[90px]">
+                      {currentUser.displayName || currentUser.email}
+                    </span>
+                    <span className={`text-[9px] font-black tracking-wider ${
+                      isPro ? 'text-emerald-500' : 'text-amber-500'
+                    }`}>
+                      {isAdmin ? '★ ADMIN' : isPro ? '◆ PRO' : 'FREE'}
+                    </span>
+                  </div>
+                  <button 
+                    onClick={logout}
+                    className="p-1.5 hover:bg-rose-500/15 rounded-lg text-slate-400 hover:text-rose-500 transition-all duration-200 hover:scale-110"
+                    title="Logout"
+                  >
+                    <LogOut size={13} />
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={loginWithGoogle}
+                  className="group relative hidden sm:flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white transition-all duration-300 shadow-lg shadow-blue-500/25 hover:shadow-xl hover:shadow-blue-500/35 hover:-translate-y-0.5 overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
+                  <LogIn size={13} className="relative" />
+                  <span className="relative">Sign In</span>
+                </button>
+              )}
+
+              {/* Mobile Sign In (icon only) */}
+              {!currentUser && (
+                <button 
+                  onClick={loginWithGoogle}
+                  className="sm:hidden p-2 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white btn-lift shadow-lg shadow-blue-500/25"
+                >
+                  <LogIn size={15} />
+                </button>
+              )}
+
+              {currentUser && (
+                <button 
+                  onClick={logout}
+                  className="sm:hidden p-2 rounded-xl border border-rose-500/30 text-rose-500 btn-lift"
+                >
+                  <LogOut size={15} />
+                </button>
+              )}
+            </div>
+
           </div>
-        </div>
 
-        {/* 2. Main Navigation Bar: Marketplaces + Merge PDF + PDF Tools Dropdown */}
-        {!showAdminView ? (
-          <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
-            {/* Marketplace Selector (Flipkart / Meesho / Amazon) */}
-            <div className={`p-1 rounded-xl flex items-center shadow-sm border ${
-              darkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-100/90 border-slate-200'
+          {/* Mobile Platform Nav (below main bar) */}
+          {!showAdminView && (
+            <nav className={`md:hidden flex items-center gap-1 px-3 pb-2.5 overflow-x-auto scrollbar-hide border-t ${
+              darkMode ? 'border-white/[0.06]' : 'border-slate-100'
             }`}>
               {platforms?.map((p) => {
                 const isActive = platform === p.id && (!activeView || activeView === 'studio');
@@ -164,198 +458,36 @@ export default function Header({
                   <button
                     key={p.id}
                     onClick={() => handleSelectPlatform(p.id)}
-                    className={`py-1.5 px-3.5 sm:px-4 rounded-lg text-xs font-bold transition-all duration-200 ${
+                    className={`flex-shrink-0 py-1.5 px-3 rounded-full text-[11px] font-bold transition-all duration-300 ${
                       isActive 
-                        ? `${activePlatform?.activeBg || 'bg-blue-600'} text-white shadow-sm` 
+                        ? `${activePlatform?.activeBg || 'bg-blue-600'} text-white shadow-md` 
                         : darkMode 
-                          ? 'text-slate-400 hover:text-slate-200' 
-                          : 'text-slate-600 hover:text-slate-900'
+                          ? 'text-slate-400 hover:text-white hover:bg-white/[0.06]' 
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-white'
                     }`}
                   >
                     {p.name}
                   </button>
                 );
               })}
-            </div>
-
-            {/* ✅ Divider between platforms and Merge PDF */}
-            <div className={`w-px h-5 mx-1 hidden sm:block ${darkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
-
-            {/* ✅ Direct "Merge PDF" Button (moved out of dropdown) */}
-            <button
-              type="button"
-              onClick={() => {
-                if (setActiveView) setActiveView('merge');
-                if (setShowAdminView) setShowAdminView(false);
-              }}
-              className={`py-2 px-3.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 border shadow-sm ${
-                isMergeActive
-                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-indigo-500/20'
-                  : darkMode
-                    ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
-              }`}
-              title="Merge multiple PDFs into one"
-            >
-              <Files size={14} className={isMergeActive ? 'text-white' : 'text-indigo-500'} />
-              <span>Merge PDF</span>
-            </button>
-
-            {/* "All PDF Tools" Button with Dropdown */}
-            <div className="relative" ref={dropdownRef}>
+              <div className={`w-px h-4 shrink-0 mx-1 ${divider}`}></div>
               <button
-                type="button"
-                onClick={() => setShowToolsDropdown((prev) => !prev)}
-                className={`py-2 px-3.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 border shadow-sm ${
-                  isToolActive
-                    ? 'bg-[#e5322d] text-white border-red-600 shadow-red-500/20'
-                    : showToolsDropdown
-                    ? darkMode ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 ring-2 ring-red-500/20'
+                onClick={handleSelectMerge}
+                className={`flex-shrink-0 py-1.5 px-3 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all duration-300 ${
+                  isMergeActive 
+                    ? 'bg-indigo-600 text-white shadow-md' 
                     : darkMode 
-                      ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800' 
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                      ? 'text-slate-400 hover:text-white hover:bg-white/[0.06]' 
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
                 }`}
               >
-                <Sparkles size={14} className={isToolActive ? 'text-white' : 'text-red-500'} />
-                <span>PDF Tools</span>
-                <ChevronDown size={13} className={`transition-transform duration-200 ${showToolsDropdown ? 'rotate-180' : ''}`} />
+                <Files size={11} />
+                <span>Merge</span>
               </button>
-
-              {/* Tools Megamenu Dropdown */}
-              {showToolsDropdown && (
-                <div className={`absolute top-full left-1/2 -translate-x-1/2 md:left-0 md:translate-x-0 mt-2 w-72 sm:w-80 rounded-2xl border shadow-2xl p-2 grid grid-cols-1 gap-1 z-50 animate-in fade-in slide-in-from-top-2 duration-150 ${
-                  darkMode ? 'bg-[#0f172a] border-slate-800' : 'bg-white border-slate-200 shadow-slate-300/50'
-                }`}>
-                  <div className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${
-                    darkMode ? 'text-slate-500' : 'text-slate-400'
-                  }`}>
-                    Free PDF Utilities (100% Client-Side)
-                  </div>
-
-                  {pdfTools.map((tool) => {
-                    const Icon = tool.icon;
-                    const isSelected = activeView === tool.id;
-                    return (
-                      <button
-                        key={tool.id}
-                        type="button"
-                        onClick={() => handleSelectTool(tool.id)}
-                        className={`p-2 rounded-xl text-left flex items-center gap-3 transition ${
-                          isSelected
-                            ? 'bg-red-500/10 border border-red-500/30'
-                            : darkMode
-                            ? 'hover:bg-slate-800/80 border border-transparent'
-                            : 'hover:bg-slate-50 border border-transparent'
-                        }`}
-                      >
-                        <div className={`p-2 rounded-lg shrink-0 ${
-                          darkMode ? 'bg-slate-800' : 'bg-slate-100'
-                        } ${tool.color}`}>
-                          <Icon size={16} />
-                        </div>
-                        <div className="min-w-0">
-                          <p className={`text-xs font-bold leading-tight ${
-                            isSelected ? 'text-red-600' : darkMode ? 'text-slate-200' : 'text-slate-800'
-                          }`}>
-                            {tool.name}
-                          </p>
-                          <p className={`text-[10px] leading-tight mt-0.5 truncate ${
-                            darkMode ? 'text-slate-400' : 'text-slate-500'
-                          }`}>
-                            {tool.desc}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className={`flex items-center gap-2 text-xs font-bold px-4 py-1.5 rounded-xl border ${
-            darkMode ? 'border-amber-500/30 bg-amber-500/10 text-amber-400' : 'border-amber-300 bg-amber-50 text-amber-700'
-          }`}>
-            <ShieldAlert size={15} />
-            <span>Admin Control Center Active</span>
-          </div>
-        )}
-
-        {/* 3. Desktop Admin, Theme & User Profile Actions */}
-        <div className="hidden md:flex items-center gap-3">
-          
-          {/* Admin Switch Button */}
-          {isAdmin && (
-            <button
-              onClick={() => setShowAdminView(!showAdminView)}
-              className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-xl border transition ${
-                showAdminView 
-                  ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20' 
-                  : darkMode
-                  ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30'
-                  : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'
-              }`}
-            >
-              {showAdminView ? (
-                <>
-                  <ArrowLeft size={14} />
-                  <span>Back to Tool</span>
-                </>
-              ) : (
-                <>
-                  <ShieldAlert size={14} />
-                  <span>Admin Panel</span>
-                </>
-              )}
-            </button>
+            </nav>
           )}
-
-          {/* Theme Toggle Button */}
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className={`p-2 rounded-xl border transition ${
-              darkMode 
-                ? 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-slate-700' 
-                : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
-            }`}
-            title="Toggle Dark/Light Mode"
-          >
-            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-
-          {/* User Profile / Auth State */}
-          {currentUser ? (
-            <div className={`flex items-center gap-3 border pl-3 pr-2 py-1 rounded-xl ${
-              darkMode ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'
-            }`}>
-              <div className="flex flex-col text-right">
-                <span className="text-xs font-semibold truncate max-w-[120px]">
-                  {currentUser.displayName || currentUser.email}
-                </span>
-                <span className={`text-[10px] font-bold ${isPro ? 'text-emerald-500' : 'text-amber-500'}`}>
-                  {isAdmin ? 'ADMIN (PRO)' : isPro ? 'PRO UNLIMITED' : 'FREE TIER'}
-                </span>
-              </div>
-              <button 
-                onClick={logout}
-                className="p-1.5 hover:bg-rose-500/20 rounded-lg text-slate-400 hover:text-rose-500 transition"
-                title="Logout"
-              >
-                <LogOut size={15} />
-              </button>
-            </div>
-          ) : (
-            <button 
-              onClick={loginWithGoogle}
-              className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition shadow-sm shadow-blue-600/20"
-            >
-              <LogIn size={14} />
-              <span>Sign In</span>
-            </button>
-          )}
-        </div>
-
+        </header>
       </div>
-    </header>
+    </>
   );
 }
