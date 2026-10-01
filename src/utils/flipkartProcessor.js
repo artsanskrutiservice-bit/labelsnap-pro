@@ -5,12 +5,13 @@ import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-const MM = 72 / 25.4;
 const A4 = { w: 595.28, h: 841.89 };
+
+// Output page size: 4×6 inch thermal
+const THERMAL_PAGE = { w: 288, h: 432 };
 
 // ─────────────────────────────────────────────────────────────
 // FLIPKART FINAL LOCKED COORDINATES (V13)
-// Coordinate system: bottom-left origin (pdf-lib native)
 // ─────────────────────────────────────────────────────────────
 const LABEL = {
   x: 189.50,
@@ -26,61 +27,69 @@ const INVOICE = {
   h: 223.82,
 };
 
-// Legacy top-based crop (kept for backward compatibility with old preview)
-const FLIPKART_LABEL = { x: 191, y: 28.5, w: 212.5, h: 352.5 };
-const FLIPKART_MARGIN = 0.5 * MM;
-const FLIPKART_CROP = {
-  x: FLIPKART_LABEL.x - FLIPKART_MARGIN,
-  y: FLIPKART_LABEL.y - FLIPKART_MARGIN,
-  w: FLIPKART_LABEL.w + 2 * FLIPKART_MARGIN,
-  h: FLIPKART_LABEL.h + 2 * FLIPKART_MARGIN,
-};
+// 🎯 WHITE MARGIN AROUND LABEL (in PDF points)
+// 3 pt ≈ 1 mm,  6 pt ≈ 2 mm,  8 pt ≈ 3 mm,  12 pt ≈ 4 mm
+const EXPAND_MARGIN = 1;
+
+// Helper — expand a crop region by a margin on all 4 sides
+function expandCrop(crop, margin) {
+  return {
+    x: crop.x - margin,
+    bottom: crop.bottom - margin,
+    w: crop.w + margin * 2,
+    h: crop.h + margin * 2,
+  };
+}
+
+const LABEL_EXPANDED = expandCrop(LABEL, EXPAND_MARGIN);
+const INVOICE_EXPANDED = expandCrop(INVOICE, EXPAND_MARGIN);
 
 // ─────────────────────────────────────────────────────────────
 // 1. Flipkart Live Preview
-//    modes: 'label_only' | 'single_page' | 'keep_invoice'
 // ─────────────────────────────────────────────────────────────
 export async function renderFlipkartPreview(inputBytes, canvas, options = {}) {
   const { darkenThermal = false, processingMode = 'label_only' } = options;
-
   const loading = pdfjsLib.getDocument({ data: inputBytes.slice() });
   const doc = await loading.promise;
   const page = await doc.getPage(1);
   const scale = 1.6;
   const vp = page.getViewport({ scale });
 
-  // Pick crop region (top-based y for canvas rendering)
-  let activeCrop;
+  const actualW = vp.width / scale;
+  const actualH = vp.height / scale;
+  const isA4Page = Math.abs(actualW - A4.w) < 20 && Math.abs(actualH - A4.h) < 20;
 
-  if (processingMode === 'single_page') {
-    activeCrop = { x: 0, y: 0, w: A4.w, h: A4.h };
+  let srcCrop;
+
+  if (processingMode === 'single_page' || !isA4Page) {
+    srcCrop = { x: 0, y: 0, w: actualW, h: actualH };
   } else if (processingMode === 'keep_invoice') {
-    // Combine LABEL + INVOICE into one preview box
-    // LABEL: bottom=459.52, h=354.74  → top = A4.h - (459.52+354.74) = 27.63
-    // INVOICE: bottom=230.47, h=223.82 → top = A4.h - (230.47+223.82) = 387.60
-    // Combined top = 27.63, combined bottom = 230.47
-    const topY = A4.h - (LABEL.bottom + LABEL.h);  // 27.63
-    const bottomY = INVOICE.bottom;                 // 230.47
-    activeCrop = {
-      x: INVOICE.x,
-      y: topY,
-      w: Math.max(LABEL.w, INVOICE.w),
-      h: A4.h - topY - bottomY,
+    const labelTop = A4.h - (LABEL_EXPANDED.bottom + LABEL_EXPANDED.h);
+    const invBottom = INVOICE_EXPANDED.bottom;
+    const leftX = Math.min(LABEL_EXPANDED.x, INVOICE_EXPANDED.x);
+    const rightX = Math.max(
+      LABEL_EXPANDED.x + LABEL_EXPANDED.w,
+      INVOICE_EXPANDED.x + INVOICE_EXPANDED.w
+    );
+    srcCrop = {
+      x: leftX,
+      y: labelTop,
+      w: rightX - leftX,
+      h: A4.h - labelTop - invBottom,
     };
   } else {
-    // label_only — use V13 LABEL coordinates (converted to top-based)
-    activeCrop = {
-      x: LABEL.x,
-      y: A4.h - (LABEL.bottom + LABEL.h),
-      w: LABEL.w,
-      h: LABEL.h,
+    srcCrop = {
+      x: LABEL_EXPANDED.x,
+      y: A4.h - (LABEL_EXPANDED.bottom + LABEL_EXPANDED.h),
+      w: LABEL_EXPANDED.w,
+      h: LABEL_EXPANDED.h,
     };
   }
 
-  const sx = activeCrop.x * scale;
-  const sy = activeCrop.y * scale;
-  const sw = activeCrop.w * scale;
-  const sh = activeCrop.h * scale;
+  const sx = srcCrop.x * scale;
+  const sy = srcCrop.y * scale;
+  const sw = srcCrop.w * scale;
+  const sh = srcCrop.h * scale;
 
   const full = document.createElement('canvas');
   full.width = Math.ceil(vp.width);
@@ -97,7 +106,6 @@ export async function renderFlipkartPreview(inputBytes, canvas, options = {}) {
 
 // ─────────────────────────────────────────────────────────────
 // 2. Flipkart Label Processing Engine
-//    modes: 'label_only' | 'single_page' | 'keep_invoice'
 // ─────────────────────────────────────────────────────────────
 export async function processFlipkartLabels(inputBytes, onProgress, options = {}) {
   const {
@@ -113,132 +121,197 @@ export async function processFlipkartLabels(inputBytes, onProgress, options = {}
   const fontRegular = await out.embedFont(StandardFonts.Helvetica);
   const manifestData = [{ sku: 'Flipkart Batch Orders', qty: total }];
 
+  const LABEL_TOLERANCE = 30 + EXPAND_MARGIN * 2;
+  const OUTPUT_PADDING = 4;
+
+  const availW = THERMAL_PAGE.w - OUTPUT_PADDING * 2;
+  const availH = THERMAL_PAGE.h - OUTPUT_PADDING * 2;
+
   for (let i = 0; i < total; i++) {
     if (onProgress) onProgress(i + 1, total);
 
-    // ─── Mode: Single Page (full A4 copy) ───────────────────
+    const sourcePage = src.getPage(i);
+    const { width: pw, height: ph } = sourcePage.getSize();
+
+    const isA4Page =
+      Math.abs(pw - A4.w) < 20 && Math.abs(ph - A4.h) < 20;
+
+    const isAlreadyLabel =
+      Math.abs(pw - LABEL_EXPANDED.w) < LABEL_TOLERANCE &&
+      Math.abs(ph - LABEL_EXPANDED.h) < LABEL_TOLERANCE;
+
+    // Single Page — full copy
     if (processingMode === 'single_page') {
       const [copiedFull] = await out.copyPages(src, [i]);
       out.addPage(copiedFull);
       continue;
     }
 
-    // ─── Mode: Label Only (V13 LOCKED method) ───────────────
-    if (processingMode === 'label_only') {
-      const embedded = await out.embedPage(src.getPage(i), {
-        left: LABEL.x,
-        bottom: LABEL.bottom,
-        right: LABEL.x + LABEL.w,
-        top: LABEL.bottom + LABEL.h,
+    // Already label-sized → scale to thermal
+    if (isAlreadyLabel) {
+      const [copied] = await out.copyPages(src, [i]);
+      const thermPage = out.addPage([THERMAL_PAGE.w, THERMAL_PAGE.h]);
+
+      const scale = Math.min(availW / pw, availH / ph);
+      const w = pw * scale;
+      const h = ph * scale;
+      const embedded = await out.embedPage(copied);
+
+      thermPage.drawPage(embedded, {
+        x: (THERMAL_PAGE.w - w) / 2,
+        y: (THERMAL_PAGE.h - h) / 2,
+        width: w,
+        height: h,
       });
-
-      const page = out.addPage([LABEL.w, LABEL.h]);
-
-      // Draw the embedded region 1:1 onto the output page
-      page.drawPage(embedded, {
-        x: 0,
-        y: 0,
-        width: LABEL.w,
-        height: LABEL.h,
-      });
-
-      if (darkenThermal) {
-        page.drawPage(embedded, {
-          x: 0,
-          y: 0,
-          width: LABEL.w,
-          height: LABEL.h,
-          opacity: 0.25,
-        });
-      }
 
       if (brandingText.trim()) {
-        page.drawText(brandingText.trim(), {
-          x: 6,
-          y: 5,
-          size: 7,
+        thermPage.drawText(brandingText.trim(), {
+          x: (THERMAL_PAGE.w - w) / 2,
+          y: 6,
+          size: 8,
           font: fontRegular,
           color: rgb(0.2, 0.2, 0.2),
         });
       }
-
       continue;
     }
 
-    // ─── Mode: Keep Invoice (Label + Tax Invoice, V13 method) ─
-    if (processingMode === 'keep_invoice') {
-      // -------- PAGE 1: Label --------
-      const labelEmbedded = await out.embedPage(src.getPage(i), {
-        left: LABEL.x,
-        bottom: LABEL.bottom,
-        right: LABEL.x + LABEL.w,
-        top: LABEL.bottom + LABEL.h,
-      });
+    // A4 page → crop + scale to thermal
+    if (isA4Page) {
+      // Label Only
+      if (processingMode === 'label_only') {
+        const embedded = await out.embedPage(sourcePage, {
+          left: LABEL_EXPANDED.x,
+          bottom: LABEL_EXPANDED.bottom,
+          right: LABEL_EXPANDED.x + LABEL_EXPANDED.w,
+          top: LABEL_EXPANDED.bottom + LABEL_EXPANDED.h,
+        });
 
-      const labelPage = out.addPage([LABEL.w, LABEL.h]);
-      labelPage.drawPage(labelEmbedded, {
-        x: 0,
-        y: 0,
-        width: LABEL.w,
-        height: LABEL.h,
-      });
+        const page = out.addPage([THERMAL_PAGE.w, THERMAL_PAGE.h]);
 
-      if (darkenThermal) {
+        const scale = Math.min(availW / LABEL_EXPANDED.w, availH / LABEL_EXPANDED.h);
+        const w = LABEL_EXPANDED.w * scale;
+        const h = LABEL_EXPANDED.h * scale;
+
+        page.drawPage(embedded, {
+          x: (THERMAL_PAGE.w - w) / 2,
+          y: (THERMAL_PAGE.h - h) / 2,
+          width: w,
+          height: h,
+        });
+
+        if (darkenThermal) {
+          page.drawPage(embedded, {
+            x: (THERMAL_PAGE.w - w) / 2,
+            y: (THERMAL_PAGE.h - h) / 2,
+            width: w,
+            height: h,
+            opacity: 0.25,
+          });
+        }
+
+        if (brandingText.trim()) {
+          page.drawText(brandingText.trim(), {
+            x: (THERMAL_PAGE.w - w) / 2,
+            y: 6,
+            size: 8,
+            font: fontRegular,
+            color: rgb(0.2, 0.2, 0.2),
+          });
+        }
+        continue;
+      }
+
+      // Keep Invoice
+      if (processingMode === 'keep_invoice') {
+        const labelEmbedded = await out.embedPage(sourcePage, {
+          left: LABEL_EXPANDED.x,
+          bottom: LABEL_EXPANDED.bottom,
+          right: LABEL_EXPANDED.x + LABEL_EXPANDED.w,
+          top: LABEL_EXPANDED.bottom + LABEL_EXPANDED.h,
+        });
+
+        const labelPage = out.addPage([THERMAL_PAGE.w, THERMAL_PAGE.h]);
+
+        const labelScale = Math.min(availW / LABEL_EXPANDED.w, availH / LABEL_EXPANDED.h);
+        const labelW = LABEL_EXPANDED.w * labelScale;
+        const labelH = LABEL_EXPANDED.h * labelScale;
+
         labelPage.drawPage(labelEmbedded, {
-          x: 0,
-          y: 0,
-          width: LABEL.w,
-          height: LABEL.h,
-          opacity: 0.25,
+          x: (THERMAL_PAGE.w - labelW) / 2,
+          y: (THERMAL_PAGE.h - labelH) / 2,
+          width: labelW,
+          height: labelH,
         });
-      }
 
-      // -------- PAGE 2: Tax Invoice (rotated -90°) --------
-      const invoiceEmbedded = await out.embedPage(src.getPage(i), {
-        left: INVOICE.x,
-        bottom: INVOICE.bottom,
-        right: INVOICE.x + INVOICE.w,
-        top: INVOICE.bottom + INVOICE.h,
-      });
+        if (darkenThermal) {
+          labelPage.drawPage(labelEmbedded, {
+            x: (THERMAL_PAGE.w - labelW) / 2,
+            y: (THERMAL_PAGE.h - labelH) / 2,
+            width: labelW,
+            height: labelH,
+            opacity: 0.25,
+          });
+        }
 
-      const invoicePage = out.addPage([LABEL.w, LABEL.h]);
+        const invoiceEmbedded = await out.embedPage(sourcePage, {
+          left: INVOICE_EXPANDED.x,
+          bottom: INVOICE_EXPANDED.bottom,
+          right: INVOICE_EXPANDED.x + INVOICE_EXPANDED.w,
+          top: INVOICE_EXPANDED.bottom + INVOICE_EXPANDED.h,
+        });
 
-      // Rotate invoice 90° counter-clockwise and fit into LABEL box
-      const rotatedW = INVOICE.h; // width after rotation
-      const rotatedH = INVOICE.w; // height after rotation
+        const invoicePage = out.addPage([THERMAL_PAGE.w, THERMAL_PAGE.h]);
 
-      const scale = Math.min(
-        LABEL.w / rotatedW,
-        LABEL.h / rotatedH
-      );
+        const rotatedW = INVOICE_EXPANDED.h;
+        const rotatedH = INVOICE_EXPANDED.w;
 
-      const drawW = rotatedW * scale;
-      const drawH = rotatedH * scale;
+        const invScale = Math.min(availW / rotatedW, availH / rotatedH);
+        const invDrawW = rotatedW * invScale;
+        const invDrawH = rotatedH * invScale;
 
-      const marginX = (LABEL.w - drawW) / 2;
-      const marginY = (LABEL.h - drawH) / 2;
+        const invMarginX = (THERMAL_PAGE.w - invDrawW) / 2;
+        const invMarginY = (THERMAL_PAGE.h - invDrawH) / 2;
 
-      invoicePage.drawPage(invoiceEmbedded, {
-        x: marginX,
-        y: LABEL.h - marginY,
-        width: drawH,
-        height: drawW,
-        rotate: degrees(-90),
-      });
-
-      if (darkenThermal) {
         invoicePage.drawPage(invoiceEmbedded, {
-          x: marginX,
-          y: LABEL.h - marginY,
-          width: drawH,
-          height: drawW,
+          x: invMarginX,
+          y: THERMAL_PAGE.h - invMarginY,
+          width: invDrawH,
+          height: invDrawW,
           rotate: degrees(-90),
-          opacity: 0.25,
         });
-      }
 
-      continue;
+        if (darkenThermal) {
+          invoicePage.drawPage(invoiceEmbedded, {
+            x: invMarginX,
+            y: THERMAL_PAGE.h - invMarginY,
+            width: invDrawH,
+            height: invDrawW,
+            rotate: degrees(-90),
+            opacity: 0.25,
+          });
+        }
+        continue;
+      }
     }
+
+    // Fallback
+    const embedded = await out.embedPage(sourcePage, {
+      left: 0, bottom: 0, right: pw, top: ph,
+    });
+
+    const page = out.addPage([THERMAL_PAGE.w, THERMAL_PAGE.h]);
+
+    const scale = Math.min(availW / pw, availH / ph);
+    const w = pw * scale;
+    const h = ph * scale;
+
+    page.drawPage(embedded, {
+      x: (THERMAL_PAGE.w - w) / 2,
+      y: (THERMAL_PAGE.h - h) / 2,
+      width: w,
+      height: h,
+    });
   }
 
   const pdfResultBytes = await out.save({

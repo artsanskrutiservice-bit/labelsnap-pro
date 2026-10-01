@@ -17,7 +17,8 @@ import {
   Sparkles,
   FileSpreadsheet,
   Image as ImageIcon,
-  FileImage
+  FileImage,
+  FileText
 } from 'lucide-react';
 
 export default function Header({
@@ -40,9 +41,8 @@ export default function Header({
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
   const dropdownRef = useRef(null);
 
-  // Updated PDF Tools List with new Image tools
+  // Updated PDF Tools List — "Merge PDF" removed (now direct button)
   const pdfTools = [
-    { id: 'merge', name: 'Merge PDF', desc: 'Combine multiple PDFs', icon: Files, color: 'text-red-500' },
     { id: 'split', name: 'Split PDF', desc: 'Extract pages or ranges', icon: Scissors, color: 'text-amber-500' },
     { id: 'crop', name: 'Selected Crop', desc: 'Visual box / preset crop', icon: Crop, color: 'text-emerald-500' },
     { id: 'rotate', name: 'Rotate PDF', desc: 'Rotate pages 90° / 180°', icon: RotateCw, color: 'text-blue-500' },
@@ -78,6 +78,7 @@ export default function Header({
   };
 
   const isToolActive = activeView && activeView !== 'studio' && !showAdminView;
+  const isMergeActive = activeView === 'merge' && !showAdminView;
 
   return (
     <header className={`border-b px-4 sm:px-6 py-3 sticky top-0 z-50 backdrop-blur-md transition-colors ${
@@ -92,12 +93,12 @@ export default function Header({
             className="flex items-center gap-3 cursor-pointer select-none"
           >
             
-            {/* અહી જૂના Scissors આઇકોનની જગ્યાએ તમારો નવો Canva લોગો આવી ગયો */}
+            {/* Logo */}
             <div className="flex items-center justify-center shrink-0">
               <img src="/logo.png" alt="MyPDFClub Logo" className="h-10 w-auto object-contain" />
             </div>
 
-            {/* વેબસાઈટનું નામ અને બેજ */}
+            {/* Brand Name & Badge */}
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-black tracking-tight bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
@@ -150,7 +151,7 @@ export default function Header({
           </div>
         </div>
 
-        {/* 2. Main Navigation Bar: Marketplaces + PDF Tools Dropdown */}
+        {/* 2. Main Navigation Bar: Marketplaces + Merge PDF + PDF Tools Dropdown */}
         {!showAdminView ? (
           <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
             {/* Marketplace Selector (Flipkart / Meesho / Amazon) */}
@@ -177,7 +178,30 @@ export default function Header({
               })}
             </div>
 
-            {/* "All PDF Tools" Button with Dropdown (iLovePDF Style) */}
+            {/* ✅ Divider between platforms and Merge PDF */}
+            <div className={`w-px h-5 mx-1 hidden sm:block ${darkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
+
+            {/* ✅ Direct "Merge PDF" Button (moved out of dropdown) */}
+            <button
+              type="button"
+              onClick={() => {
+                if (setActiveView) setActiveView('merge');
+                if (setShowAdminView) setShowAdminView(false);
+              }}
+              className={`py-2 px-3.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 border shadow-sm ${
+                isMergeActive
+                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-indigo-500/20'
+                  : darkMode
+                    ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 hover:border-slate-700'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+              }`}
+              title="Merge multiple PDFs into one"
+            >
+              <Files size={14} className={isMergeActive ? 'text-white' : 'text-indigo-500'} />
+              <span>Merge PDF</span>
+            </button>
+
+            {/* "All PDF Tools" Button with Dropdown */}
             <div className="relative" ref={dropdownRef}>
               <button
                 type="button"

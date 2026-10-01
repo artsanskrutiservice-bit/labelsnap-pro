@@ -8,6 +8,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 const A4 = { w: 595.28, h: 841.89 };
 const AMAZON_CROP = { x: 17, y: 12, w: 561, h: 830 };
 
+// ─────────────────────────────────────────────────────────────
+// SKU / QTY HEADER STYLING (tune these to change size)
+// ─────────────────────────────────────────────────────────────
+const HEADER_FONT_SIZE = 7;       // ← SKU + QTY text size (was 9)
+const HEADER_Y_OFFSET = 12;       // ← distance from top (was 16)
+const HEADER_TRUNCATE_GAP = 120;  // ← less gap = more room for SKU text (was 145)
+
 // 1. Amazon Invoice & Item Details Extraction
 async function extractAmazonInvoiceInfo(pdfjsDoc, invoicePageNum) {
   try {
@@ -95,9 +102,10 @@ export async function renderAmazonPreview(inputBytes, canvas, options = {}) {
 
   ctx.filter = 'none';
   ctx.fillStyle = '#000000';
-  ctx.font = `700 ${11 * scale}px Arial`;
-  ctx.fillText(`SKU: ${firstSku}`, 10 * scale, 15 * scale);
-  ctx.fillText(`QTY: ${firstQty}`, (sw / scale - 65) * scale, 15 * scale);
+  // ✅ Smaller preview text (matches output PDF)
+  ctx.font = `700 ${9 * scale}px Arial`;
+  ctx.fillText(`SKU: ${firstSku}`, 10 * scale, HEADER_Y_OFFSET * scale);
+  ctx.fillText(`QTY: ${firstQty}`, (sw / scale - 55) * scale, HEADER_Y_OFFSET * scale);
 }
 
 // 3. Amazon Label Processing Engine
@@ -153,6 +161,9 @@ export async function processAmazonLabels(inputBytes, onProgress, options = {}) 
   const outputW = AMAZON_CROP.w;
   const outputH = AMAZON_CROP.h;
 
+  // ✅ Header Y position (smaller = closer to top edge)
+  const headerY = outputH - HEADER_Y_OFFSET;
+
   for (const item of ordersData) {
     const sourcePage = src.getPage(item.labelPageIndex);
     const embedded = await out.embedPage(sourcePage, {
@@ -169,34 +180,59 @@ export async function processAmazonLabels(inputBytes, onProgress, options = {}) 
       page.drawPage(embedded, { x: 0, y: 0, width: outputW, height: outputH, opacity: 0.25 });
     }
 
-    page.drawText('SKU:', { x: 10, y: outputH - 16, size: 9, font: fontBold, color: rgb(0, 0, 0) });
+    // ✅ Smaller SKU label
+    page.drawText('SKU:', {
+      x: 8,
+      y: headerY,
+      size: HEADER_FONT_SIZE,
+      font: fontBold,
+      color: rgb(0, 0, 0),
+    });
 
     let skuDisplay = item.sku;
     if (amazonSkuMode === 'with_desc' && item.description && item.description !== item.sku) {
       skuDisplay = `${item.sku} - ${item.description}`;
     }
 
-    const maxSkuWidth = outputW - 145;
-    while (skuDisplay.length > 5 && fontBold.widthOfTextAtSize(skuDisplay, 9) > maxSkuWidth) {
+    // ✅ Use HEADER_FONT_SIZE for truncation calc (not hardcoded 9)
+    const maxSkuWidth = outputW - HEADER_TRUNCATE_GAP;
+    while (
+      skuDisplay.length > 5 &&
+      fontBold.widthOfTextAtSize(skuDisplay, HEADER_FONT_SIZE) > maxSkuWidth
+    ) {
       skuDisplay = skuDisplay.slice(0, -1);
     }
     if (skuDisplay !== item.sku && !skuDisplay.endsWith('...')) skuDisplay += '...';
 
-    page.drawText(skuDisplay, { x: 42, y: outputH - 16, size: 8.5, font: fontBold, color: rgb(0, 0, 0) });
-    page.drawText(`QTY: ${item.qty}`, { x: outputW - 65, y: outputH - 16, size: 9, font: fontBold, color: rgb(0, 0, 0) });
+    // ✅ Smaller SKU text
+    page.drawText(skuDisplay, {
+      x: 28,
+      y: headerY,
+      size: HEADER_FONT_SIZE,
+      font: fontBold,
+      color: rgb(0, 0, 0),
+    });
+
+    // ✅ Smaller QTY text
+    page.drawText(`QTY: ${item.qty}`, {
+      x: outputW - 48,
+      y: headerY,
+      size: HEADER_FONT_SIZE,
+      font: fontBold,
+      color: rgb(0, 0, 0),
+    });
 
     if (brandingText.trim()) {
       page.drawText(brandingText.trim(), {
-        x: 15,
-        y: 8,
-        size: 7.5,
+        x: 12,
+        y: 6,
+        size: 6,
         font: fontRegular,
         color: rgb(0.2, 0.2, 0.2),
       });
     }
 
     if (amazonInvoiceMode === 'keep') {
-      const invPage = src.getPage(item.invoicePageIndex);
       const [copiedInv] = await out.copyPages(src, [item.invoicePageIndex]);
       out.addPage(copiedInv);
     }
